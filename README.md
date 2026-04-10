@@ -1,26 +1,51 @@
-# Fabric Tools
+# fabric-tools
 
-A collection of reusable Microsoft Fabric notebooks for tenant provisioning, item management, and administration using Service Principal authentication.
+A collection of Microsoft Fabric notebooks for platform engineering — SPN-first, Variable Library-driven, and CI/CD-ready.
 
-## Notebooks
+Most community Fabric content assumes interactive user authentication and manual portal clicks. This toolkit takes the opposite approach: everything runs via service principal, everything is parameterized, and everything is designed to slot into automated pipelines.
 
-| Notebook | Description |
-| --- | --- |
-| `nb_spn_common` | Shared utilities — imports, Key Vault credential retrieval, access token acquisition, and helper functions. Referenced by all other notebooks via `%run`. |
-| `nb_spn_create_item` | Create Fabric items (Workspaces, Lakehouses, Notebooks, Warehouses, Pipelines, Dataflows, SQL Databases, Variable Libraries, Eventhouses, Eventstreams, Ontologies, Reflexes). Supports single and batch item deployment. |
-| `nb_spn_mirror` | Create and manage Mirrored Databases (Azure SQL, SQL MI, SQL Server, PostgreSQL, Cosmos DB) and Mirrored Databricks Catalogs. Includes connection validation and provisioning status polling. |
-| `nb_spn_identity` | Manage item identities — associate the calling SPN/user/MI as the default identity for supported items (Lakehouse, Eventstream). Includes Warehouse takeover via Power BI API. |
-| `nb_lh_optimize` | Lakehouse maintenance — Delta table optimization and vacuum operations. |
-| `nb_extract_guids` | Extract workspace and item GUIDs for automation and configuration. |
+## Repository Structure
+
+```
+fabric-tools/
+├── admin/              # SPN-based workspace provisioning, item creation, identity, mirroring
+│   ├── nb_spn_common.ipynb
+│   ├── nb_spn_create_item.ipynb
+│   ├── nb_spn_identity.ipynb
+│   ├── nb_spn_mirror.ipynb
+│   └── README.md
+├── maintenance/        # Lakehouse optimization, Spark configuration, table settings
+│   ├── nb_lh_optimize.ipynb
+│   ├── nb_spark_config.ipynb
+│   └── README.md
+├── utilities/          # GUID extraction, Variable Library management
+│   ├── nb_extract_guids.ipynb
+│   └── README.md
+└── README.md
+```
 
 ## Prerequisites
 
-- A Microsoft Fabric capacity with an active workspace
-- An Entra ID Service Principal with Fabric API permissions
-- An Azure Key Vault storing the SPN credentials (`FabricTenantId`, `FabricClientId`, `FabricClientSecret`)
+- Microsoft Fabric workspace with capacity assigned
+- Azure Key Vault with service principal credentials stored as secrets
+- Service principal with appropriate Fabric API permissions
+- Fabric notebooks runtime (PySpark)
 
-## Usage
+## Design Principles
 
-1. Upload the notebooks to a Fabric workspace
-2. Update the Key Vault name in `nb_spn_common` to match your environment
-3. Run any of the task-specific notebooks — each one calls `%run nb_spn_common` to load shared configuration and functions automatically
+- **SPN-first**: All admin operations authenticate via service principal through Azure Key Vault — no interactive login dependencies.
+- **Variable Library-driven**: GUIDs and environment-specific values are managed through Fabric Variable Libraries, not hardcoded in notebooks.
+- **Idempotent where possible**: Maintenance operations (OPTIMIZE, VACUUM) are safe to re-run. Creation operations validate before acting.
+- **LRO-aware**: All long-running Fabric REST API operations are polled to completion with timeout handling.
+
+## Getting Started
+
+1. Clone or import these notebooks into your Fabric workspace.
+2. Configure `nb_spn_common` with your Key Vault name and secret names.
+3. Start with `admin/nb_spn_create_item.ipynb` to provision workspace items, or `maintenance/nb_lh_optimize.ipynb` to run table maintenance.
+
+See each folder's README for detailed usage.
+
+## License
+
+MIT

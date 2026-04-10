@@ -27,3 +27,6 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Power BI
+*.pbix
