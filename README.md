@@ -21,6 +21,10 @@ fabric-tools/
 ├── utilities/          # GUID extraction, Variable Library management
 │   ├── nb_extract_guids.ipynb
 │   └── README.md
+├── guides/             # Reusable configuration guides for Fabric Copilot surfaces
+│   ├── configure-ai-semantic-model.md
+│   ├── configure-data-agent.md
+│   └── README.md
 └── README.md
 ```
 
