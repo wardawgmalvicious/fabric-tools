@@ -1,3 +1,8 @@
+---
+name: fabric-copilot-semantic-model
+description: "Use when configuring AI instructions on a Power BI semantic model — the 10,000-character blob attached via `Prep data for AI` → `Add AI instructions` in Desktop or the service. Applies everywhere Copilot uses the model (reports, Q&A, Copilot pane). Covers what belongs in the blob (business context, terminology, date rules, default tables/measures, relationship navigation, hard rules, disambiguation) vs. what does NOT (per-column synonyms, descriptions, format strings, persona/tone, Q&A pairs). Includes prompt-engineering patterns, the 8,000-char target to leave iteration headroom, limitations (no deterministic enforcement, not visible to users, no per-persona scoping)."
+---
+
 # Configuring Power BI Semantic Model AI Instructions
 
 A practical, reusable guide for configuring AI instructions on a semantic model. Use this template across projects — the example domain (retail / sales) is illustrative; replace it with your own without changing the structure.
@@ -17,7 +22,7 @@ It applies **wherever the model is consumed by Copilot** — Power BI reports, Q
 - **Semantic Model AI Instructions** — guidance attached to one semantic model. No multi-source routing, no conversational flow. Applies to every Copilot interaction with this model.
 - **Data Agent** — a separate conversational interface with multi-source routing, few-shot example queries, and conversational response formatting.
 
-See `configure-data-agent.md` for data agent specifics.
+See the fabric-copilot-data-agent skill for data agent specifics.
 
 ---
 
@@ -254,89 +259,6 @@ Hard limit. Plan for it.
 
 ---
 
-## Full worked example
-
-A complete, self-contained instructions blob for a retail semantic model. Replace the business domain with your own — the structure is what's reusable. Designed to stay under 8,000 characters so there's headroom for iteration.
-
-```md
-## Business context
-You're a BI analyst for a multi-region retail business covering physical
-stores and an e-commerce channel. This model covers sales performance,
-product mix, inventory, and store productivity at line-item grain, refreshed
-nightly. Default the analytical frame to revenue, margin, and sell-through
-unless the user asks something else explicitly.
-
-## Terminology
-- `GMV` = Gross Merchandise Value (before returns and discounts).
-- `NMV` = Net Merchandise Value (after returns, before discounts).
-- `AOV` = Average Order Value = `[Net Sales]` / `[Order Count]`.
-- "Comp sales" / "like-for-like" = stores open more than 12 months.
-- "Sell-through" = units sold / units received for the same period.
-- "Active customer" = at least one purchase in the last 90 days.
-
-## Date and time rules
-- Fiscal year starts 1 February. Fiscal Q1 = Feb-Apr.
-- When the user asks about "this year" without qualification, assume fiscal
-  year, not calendar year.
-- Default date column is `'Date'[Date]`. Use `'Date'[FiscalYear]` and
-  `'Date'[FiscalQuarter]` for period comparisons.
-- Prefer the existing time-intelligence measures (`[Net Sales MTD]`,
-  `[Net Sales YTD]`, `[Net Sales LY]`) over ad-hoc DAX.
-
-## Default tables and measures
-- Revenue: `[Net Sales]` by default. Use `[Gross Sales]` only when the user
-  says "gross", "before returns", or "before discounts".
-- Units: `[Units Sold]` by default. `[Units Returned]` is a separate measure.
-- Margin: `[Gross Margin %]` for ratios, `[Gross Margin $]` for absolute.
-- Customer counts: `[Active Customers]` by default. Use `[Total Customers]`
-  only for all-time questions.
-- Inventory questions: use the `'Inventory'` table, not `'Sales'`.
-
-## Relationship navigation
-- `'Sales'` to `'Date'` has two relationships. The active one uses
-  `SaleDate`. Use the inactive relationship (`OrderDate`) via
-  `USERELATIONSHIP` ONLY when the user explicitly says "ordered on".
-- Always join `'Sales'` to `'Product'` via `ProductKey`, never via
-  `ProductName` — names aren't unique.
-- `'Store'` joins to `'Sales'` via `StoreKey`. There is no direct join from
-  `'Store'` to `'Customer'`.
-
-## Hard rules
-- Always exclude test transactions: `'Sales'[IsTest] = FALSE`.
-- Exclude staff-purchase rows from customer analysis (count customers,
-  customer segmentation) but include them in sales totals.
-- Store `9999` is a warehouse consolidation store, not a real store. Exclude
-  from any store-level comparison.
-- Discontinued products (`'Product'[IsActive] = FALSE`) are excluded from
-  "current assortment" questions but retained in historical analysis.
-- For any "channel" comparison, use `'Sales'[Channel]` ('Store' or 'Online'),
-  not store attributes.
-
-## Disambiguation
-- Two columns called "Region": `'Store'[Region]` (geography) and
-  `'Customer'[Region]` (billing region). Default to `'Store'[Region]` unless
-  the question is clearly about the customer.
-- "Category" exists on both `'Product'` and `'Campaign'`. Default to
-  `'Product'[Category]`.
-- When a user says "price", default to `'Sales'[UnitPrice]`, not
-  `'Product'[ListPrice]`.
-
-## Handling common topics
-- Top N customer questions:
-  1. Aggregate `[Net Sales]` by `'Customer'[CustomerKey]`.
-  2. Filter to active customers (last 12 months).
-  3. Return top 10 by `[Net Sales]` descending.
-- "How are we doing?" without further context: show `[Net Sales]`,
-  `[Net Sales vs LY %]`, and `[Gross Margin %]` for the current fiscal
-  quarter.
-- Store performance comparisons: default to comp-store sales unless the user
-  asks otherwise.
-- New product performance: filter to products with `[Launch Date]` in the
-  last 90 days; report `[Units Sold]`, `[Net Sales]`, and `[Sell-through %]`.
-```
-
----
-
 ## Key differences from Data Agent instructions
 
 - **Structure** — semantic model is one unstructured blob; data agent has four configuration layers (agent, data source, description, example queries).
@@ -354,6 +276,12 @@ unless the user asks something else explicitly.
 - Microsoft Learn: [Prepare your data for AI: AI instructions](https://learn.microsoft.com/en-us/power-bi/create-reports/copilot-prepare-data-ai-instructions)
 - Microsoft Learn: [Prep data for AI overview](https://learn.microsoft.com/en-us/power-bi/create-reports/copilot-prepare-data-ai)
 - Microsoft Learn: [Verified answers](https://learn.microsoft.com/en-us/power-bi/create-reports/copilot-prepare-data-ai-verified-answers)
+
+---
+
+## See also
+
+- For a starting-point AI-instructions example, see the fabric-tools repo.
 
 ---
 
