@@ -1,6 +1,6 @@
 # admin/
 
-Service principal–driven notebooks for provisioning and managing Fabric workspace items. Every notebook here authenticates via SPN credentials pulled from Azure Key Vault — no interactive login, no user-context calls.
+Service principal–driven notebooks for provisioning and managing Fabric workspace items. Every notebook here authenticates via SPN credentials pulled from Azure Key Vault - no interactive login, no user-context calls.
 
 ## Contents
 
@@ -20,7 +20,7 @@ Service principal–driven notebooks for provisioning and managing Fabric worksp
 
 ## %run Dependency Graph
 
-`nb_spn_common` is the base module — it loads libraries, fetches the SPN credential bundle from Key Vault, and defines helper functions (`get_token`, `get_capacity_id`, `get_item_id_by_name`, ...). The other three notebooks `%run` it at the top of their first cell and then use the functions directly.
+`nb_spn_common` is the base module - it loads libraries, fetches the SPN credential bundle from Key Vault, and defines helper functions (`get_token`, `get_capacity_id`, `get_item_id_by_name`, ...). The other three notebooks `%run` it at the top of their first cell and then use the functions directly.
 
 ```
                     ┌─────────────────────┐
@@ -38,4 +38,4 @@ Service principal–driven notebooks for provisioning and managing Fabric worksp
   └──────────────────┘ └─────────────────┘ └────────────────┘
 ```
 
-Run `nb_spn_common` standalone only when testing the Key Vault / token plumbing. For everything else, open one of the three downstream notebooks — the `%run` brings the common module in automatically.
+Run `nb_spn_common` standalone only when testing the Key Vault / token plumbing. For everything else, open one of the three downstream notebooks - the `%run` brings the common module in automatically.

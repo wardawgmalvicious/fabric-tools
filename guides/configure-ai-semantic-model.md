@@ -1,11 +1,11 @@
 ---
 name: fabric-copilot-semantic-model
-description: "Use when configuring AI instructions on a Power BI semantic model — the 10,000-character blob attached via `Prep data for AI` → `Add AI instructions` in Desktop or the service. Applies everywhere Copilot uses the model (reports, Q&A, Copilot pane). Covers what belongs in the blob (business context, terminology, date rules, default tables/measures, relationship navigation, hard rules, disambiguation) vs. what does NOT (per-column synonyms, descriptions, format strings, persona/tone, Q&A pairs). Includes prompt-engineering patterns, the 8,000-char target to leave iteration headroom, limitations (no deterministic enforcement, not visible to users, no per-persona scoping)."
+description: "Use when configuring AI instructions on a Power BI semantic model - the 10,000-character blob attached via `Prep data for AI` -> `Add AI instructions` in Desktop or the service. Applies everywhere Copilot uses the model (reports, Q&A, Copilot pane). Covers what belongs in the blob (business context, terminology, date rules, default tables/measures, relationship navigation, hard rules, disambiguation) vs. what does NOT (per-column synonyms, descriptions, format strings, persona/tone, Q&A pairs). Includes prompt-engineering patterns, the 8,000-char target to leave iteration headroom, limitations (no deterministic enforcement, not visible to users, no per-persona scoping)."
 ---
 
 # Configuring Power BI Semantic Model AI Instructions
 
-A practical, reusable guide for configuring AI instructions on a semantic model. Use this template across projects — the example domain (retail / sales) is illustrative; replace it with your own without changing the structure.
+A practical, reusable guide for configuring AI instructions on a semantic model. Use this template across projects - the example domain (retail / sales) is illustrative; replace it with your own without changing the structure.
 
 ---
 
@@ -13,14 +13,14 @@ A practical, reusable guide for configuring AI instructions on a semantic model.
 
 A single text blob (up to 10,000 characters) attached directly to the semantic model. It provides context, business logic, and guidance that Copilot uses when interpreting user questions against the model.
 
-It applies **wherever the model is consumed by Copilot** — Power BI reports, Q&A visuals, the Copilot pane, and any downstream surface that uses this model. Not just a single surface.
+It applies **wherever the model is consumed by Copilot** - Power BI reports, Q&A visuals, the Copilot pane, and any downstream surface that uses this model. Not just a single surface.
 
 ---
 
 ## When you use this vs. Data Agent instructions
 
-- **Semantic Model AI Instructions** — guidance attached to one semantic model. No multi-source routing, no conversational flow. Applies to every Copilot interaction with this model.
-- **Data Agent** — a separate conversational interface with multi-source routing, few-shot example queries, and conversational response formatting.
+- **Semantic Model AI Instructions** - guidance attached to one semantic model. No multi-source routing, no conversational flow. Applies to every Copilot interaction with this model.
+- **Data Agent** - a separate conversational interface with multi-source routing, few-shot example queries, and conversational response formatting.
 
 See the fabric-copilot-data-agent skill for data agent specifics.
 
@@ -65,7 +65,7 @@ something else explicitly.
 
 ### Terminology and synonyms
 
-Cross-cutting business terms, acronyms, and aliases that appear in user questions but not in the model schema. Per-column synonyms do NOT go here — those belong on the column in TMDL.
+Cross-cutting business terms, acronyms, and aliases that appear in user questions but not in the model schema. Per-column synonyms do NOT go here - those belong on the column in TMDL.
 
 ```md
 ## Terminology
@@ -87,7 +87,7 @@ Fiscal calendar, default date columns, period definitions, reporting cadence.
 - When the user asks about "this year" without qualification, assume fiscal
   year, not calendar year.
 - Default date column for any trend analysis is `'Date'[Date]`. Do NOT use
-  `'Sales'[OrderDate]` — it doesn't include returns.
+  `'Sales'[OrderDate]` - it doesn't include returns.
 - "Month-to-date" and "year-to-date" should use the DAX time-intelligence
   measures already on the model (`[Sales MTD]`, `[Sales YTD]`), not ad-hoc
   calculations.
@@ -95,7 +95,7 @@ Fiscal calendar, default date columns, period definitions, reporting cadence.
 
 ### Default tables and measures
 
-Which table or measure to prefer for which question type. This is the highest-leverage section — one good rule here prevents dozens of wrong queries.
+Which table or measure to prefer for which question type. This is the highest-leverage section - one good rule here prevents dozens of wrong queries.
 
 ```md
 ## Default tables and measures
@@ -118,7 +118,7 @@ Which relationship path to take when multiple exist between the same pair of tab
   `SaleDate`. Use the inactive one (`OrderDate`) via `USERELATIONSHIP` ONLY
   when the user explicitly says "ordered on" or "order date".
 - When joining `'Sales'` to `'Product'`, always go via `ProductKey`, never
-  via `ProductName` — names aren't unique.
+  via `ProductName` - names aren't unique.
 ```
 
 ### Hard business rules and exclusions
@@ -155,13 +155,13 @@ Field or term clashes inside the model that a natural-language question can't re
 
 ## What does NOT belong here
 
-- **Per-column synonyms and aliases** — these belong in TMDL as synonyms on the column. Duplicating them in the blob wastes characters and creates drift.
-- **Column and measure descriptions** — these belong in the TMDL description property on the column or measure.
-- **Format strings** (currency, percent, text-format IDs) — these belong on the column or measure format property.
-- **Response formatting, tone, or persona instructions** — Microsoft explicitly states AI instructions are not intended for persona-specific or non-data output modifications.
-- **Conversational or multi-turn flows** (e.g., "if the user asks X, first ask Y") — the semantic model has no agent-like conversation loop.
-- **SQL or DAX query syntax hints** — Copilot traverses the model directly; it doesn't write queries the way a data agent does.
-- **Verified-answer-style Q&A pairs** — use the dedicated Verified Answers feature instead.
+- **Per-column synonyms and aliases** - these belong in TMDL as synonyms on the column. Duplicating them in the blob wastes characters and creates drift.
+- **Column and measure descriptions** - these belong in the TMDL description property on the column or measure.
+- **Format strings** (currency, percent, text-format IDs) - these belong on the column or measure format property.
+- **Response formatting, tone, or persona instructions** - Microsoft explicitly states AI instructions are not intended for persona-specific or non-data output modifications.
+- **Conversational or multi-turn flows** (e.g., "if the user asks X, first ask Y") - the semantic model has no agent-like conversation loop.
+- **SQL or DAX query syntax hints** - Copilot traverses the model directly; it doesn't write queries the way a data agent does.
+- **Verified-answer-style Q&A pairs** - use the dedicated Verified Answers feature instead.
 
 Rule of thumb: if it's about a specific field or measure, it belongs on the field or measure. The blob is for **cross-cutting** guidance.
 
@@ -196,7 +196,7 @@ Explicitly state what to do AND what not to do.
 
 ```md
 For `[Active Customer Count]`, use the `[Monthly Active Customers]` measure.
-Do NOT filter on the `'Customer'` table directly — that misses customers
+Do NOT filter on the `'Customer'` table directly - that misses customers
 who have only placed orders in the `'Orders'` table.
 ```
 
@@ -219,7 +219,7 @@ Conflicts and complexity confuse the LLM. If two rules contradict, the model hed
 
 ### Iterate
 
-Order and wording affect outputs — expect to tune. Rebuild the Copilot pane between edits. Keep a regression question bank (below) to catch drift.
+Order and wording affect outputs - expect to tune. Rebuild the Copilot pane between edits. Keep a regression question bank (below) to catch drift.
 
 ---
 
@@ -238,7 +238,7 @@ Hard limit. Plan for it.
 
 ## Limitations to be aware of
 
-- **No guaranteed adherence.** Instructions are LLM-interpreted. There is no deterministic enforcement. If a rule must be enforced (e.g., hiding sensitive columns, row-level security), use the correct mechanism — not the instructions blob.
+- **No guaranteed adherence.** Instructions are LLM-interpreted. There is no deterministic enforcement. If a rule must be enforced (e.g., hiding sensitive columns, row-level security), use the correct mechanism - not the instructions blob.
 - **End users cannot see the instructions.** No transparency to consumers. Do not put governance disclaimers or audit text here expecting it to be visible.
 - **Not respected in all Copilot paths in Desktop.** AI instructions may be ignored when creating report pages, getting page suggestions, or generating dataset summaries unless the skill picker is set to **Create new report pages**.
 - **No per-persona or per-mode rules.** Instructions cannot be scoped to specific users, groups, or view/edit modes.
@@ -254,20 +254,20 @@ Hard limit. Plan for it.
 - Maintain a **regression question bank** (50–100 representative questions with approved answers).
 - Re-run the bank after any material change to the instructions or the model.
 - Track accuracy over time. Investigate any degradation immediately.
-- Version control the blob in your repo. It is not stored in TMDL — treat it as a separate first-class artifact.
+- Version control the blob in your repo. It is not stored in TMDL - treat it as a separate first-class artifact.
 - Assign ownership: who approves changes, who maintains descriptions, who signs off on new rules.
 
 ---
 
 ## Key differences from Data Agent instructions
 
-- **Structure** — semantic model is one unstructured blob; data agent has four configuration layers (agent, data source, description, example queries).
-- **Multi-source** — semantic model applies to exactly one model; data agent routes across up to 5 sources.
-- **Example queries / few-shot** — not available on the semantic model; dedicated feature on the data agent (but not on semantic-model data sources within the agent).
-- **Response formatting and conversational behavior** — explicitly out of scope for the semantic model; configurable on the data agent.
-- **Character limit** — semantic model is capped at 10,000; data agent has no single documented hard cap.
-- **Consumption surface** — semantic model instructions apply everywhere Copilot uses the model (reports, Q&A, Copilot chat, downstream consumers); data agent instructions apply only within the agent chat.
-- **Visibility to end users** — neither is visible to end users in the UI.
+- **Structure** - semantic model is one unstructured blob; data agent has four configuration layers (agent, data source, description, example queries).
+- **Multi-source** - semantic model applies to exactly one model; data agent routes across up to 5 sources.
+- **Example queries / few-shot** - not available on the semantic model; dedicated feature on the data agent (but not on semantic-model data sources within the agent).
+- **Response formatting and conversational behavior** - explicitly out of scope for the semantic model; configurable on the data agent.
+- **Character limit** - semantic model is capped at 10,000; data agent has no single documented hard cap.
+- **Consumption surface** - semantic model instructions apply everywhere Copilot uses the model (reports, Q&A, Copilot chat, downstream consumers); data agent instructions apply only within the agent chat.
+- **Visibility to end users** - neither is visible to end users in the UI.
 
 ---
 
