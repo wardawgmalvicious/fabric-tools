@@ -25,6 +25,7 @@ fabric-tools/
 │   ├── configure-ai-semantic-model.md
 │   ├── configure-data-agent.md
 │   └── README.md
+├── .githooks/          # Opt-in pre-commit hook that strips Fabric metadata from notebooks
 └── README.md
 ```
 
@@ -49,6 +50,18 @@ fabric-tools/
 3. Start with `admin/nb_spn_create_item.ipynb` to provision workspace items, or `maintenance/nb_lh_optimize.ipynb` to run table maintenance.
 
 See each folder's README for detailed usage.
+
+## Contributing
+
+Notebooks downloaded from Fabric carry workspace-bound metadata — default lakehouse GUIDs, `spark_compute.compute_id`, `a365ComputeOptions`, and session settings — that should not be committed. A pre-commit hook in [.githooks/](.githooks/) strips this metadata automatically (and resets cell `outputs` / `execution_count`) on every commit.
+
+Activate it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook requires PowerShell 7+ (`pwsh`) on PATH. Bypass with `git commit --no-verify` if needed.
 
 ## License
 
