@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Strip Fabric-injected metadata from staged notebooks and re-stage them.
+# Activate with:  git config core.hooksPath .githooks
+# Bypass with:    git commit --no-verify
+set -euo pipefail
+
+hook_dir="$(cd "$(dirname "$0")" && pwd)"
+scrubber="$hook_dir/scrub-fabric-notebook.ps1"
+
+if [ ! -f "$scrubber" ]; then
+  echo "pre-commit: scrubber not found at $scrubber" >&2
+  exit 1
+fi
+
+# Staged .ipynb files (Added, Copied, Modified, Renamed). NUL-delimited for paths with spaces.
+mapfile -d '' -t staged < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.ipynb')
+
+if [ ${#staged[@]} -eq 0 ]; then
+  exit 0
+fi
+
+if command -v pwsh >/dev/null 2>&1; then
+  ps_exe=pwsh
+elif command -v powershell >/dev/null 2>&1; then
+  ps_exe=powershell
+else
+  echo "pre-commit: pwsh/powershell not on PATH; cannot scrub notebooks." >&2
+  echo "            install PowerShell 7+ or bypass with: git commit --no-verify" >&2
+  exit 1
+fi
+
+changed=0
+for f in "${staged[@]}"; do
+  before_hash=$(git hash-object -- "$f")
+  "$ps_exe" -NoProfile -NoLogo -ExecutionPolicy Bypass -File "$scrubber" "$f"
+  after_hash=$(git hash-object -- "$f")
+  if [ "$before_hash" != "$after_hash" ]; then
+    git add -- "$f"
+    changed=$((changed + 1))
+  fi
+done
+
+if [ "$changed" -gt 0 ]; then
+  echo "pre-commit: scrubbed Fabric metadata in $changed notebook(s) and re-staged."
+fi

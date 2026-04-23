@@ -1,0 +1,6 @@
+# Notebooks are JSON — pin to LF so the metadata-scrubber hook is idempotent
+# regardless of core.autocrlf on the local clone.
+*.ipynb       text eol=lf
+
+# Shell-based git hooks must stay LF or bash on macOS/Linux rejects the shebang.
+.githooks/*   text eol=lf
