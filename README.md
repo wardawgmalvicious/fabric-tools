@@ -1,6 +1,6 @@
 # fabric-tools
 
-A collection of Microsoft Fabric notebooks for platform engineering — SPN-first, Variable Library-driven, and CI/CD-ready.
+A collection of Microsoft Fabric notebooks for platform engineering - SPN-first, Variable Library-driven, and CI/CD-ready.
 
 Most community Fabric content assumes interactive user authentication and manual portal clicks. This toolkit takes the opposite approach: everything runs via service principal, everything is parameterized, and everything is designed to slot into automated pipelines.
 
@@ -15,11 +15,16 @@ fabric-tools/
 │   ├── nb_spn_mirror.ipynb
 │   └── README.md
 ├── maintenance/        # Lakehouse optimization, Spark configuration, table settings
+│   ├── nb_lh_configure.ipynb
 │   ├── nb_lh_optimize.ipynb
 │   ├── nb_spark_config.ipynb
 │   └── README.md
+├── integration/        # Reference patterns for ingesting from external systems
+│   ├── nb_salesforce_ingest.ipynb
+│   └── README.md
 ├── utilities/          # GUID extraction, Variable Library management
 │   ├── nb_extract_guids.ipynb
+│   ├── nb_migrate_items.ipynb
 │   └── README.md
 ├── guides/             # Reusable configuration guides for Fabric Copilot surfaces
 │   ├── configure-ai-semantic-model.md
@@ -38,7 +43,7 @@ fabric-tools/
 
 ## Design Principles
 
-- **SPN-first**: All admin operations authenticate via service principal through Azure Key Vault — no interactive login dependencies.
+- **SPN-first**: All admin operations authenticate via service principal through Azure Key Vault - no interactive login dependencies.
 - **Variable Library-driven**: GUIDs and environment-specific values are managed through Fabric Variable Libraries, not hardcoded in notebooks.
 - **Idempotent where possible**: Maintenance operations (OPTIMIZE, VACUUM) are safe to re-run. Creation operations validate before acting.
 - **LRO-aware**: All long-running Fabric REST API operations are polled to completion with timeout handling.
@@ -53,7 +58,7 @@ See each folder's README for detailed usage.
 
 ## Contributing
 
-Notebooks downloaded from Fabric carry workspace-bound metadata — default lakehouse GUIDs, `spark_compute.compute_id`, `a365ComputeOptions`, and session settings — that should not be committed. A pre-commit hook in [.githooks/](.githooks/) strips this metadata automatically (and resets cell `outputs` / `execution_count`) on every commit.
+Notebooks downloaded from Fabric carry workspace-bound metadata - default lakehouse GUIDs, `spark_compute.compute_id`, `a365ComputeOptions`, and session settings - that should not be committed. A pre-commit hook in [.githooks/](.githooks/) strips this metadata automatically (and resets cell `outputs` / `execution_count`) on every commit.
 
 Activate it once per clone:
 

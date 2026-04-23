@@ -11,7 +11,7 @@ a365ComputeOptions, sessionKeepAliveTimeout, nteract, and spark_compute
 outputs and execution_count and drops every per-cell metadata key except
 the ones on the allowlist.
 
-Idempotent — running twice on the same file is a no-op.
+Idempotent - running twice on the same file is a no-op.
 
 .PARAMETER Paths
 One or more notebook paths to scrub.

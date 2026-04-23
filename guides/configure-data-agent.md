@@ -1,6 +1,6 @@
 # Configuring Fabric Data Agents
 
-A practical, reusable guide for configuring a Fabric Data Agent so it returns accurate, contextually relevant answers. Use this template across projects — replace the example domain (retail / sales / logistics) with your own without changing the structure.
+A practical, reusable guide for configuring a Fabric Data Agent so it returns accurate, contextually relevant answers. Use this template across projects - replace the example domain (retail / sales / logistics) with your own without changing the structure.
 
 ---
 
@@ -10,14 +10,14 @@ A Fabric Data Agent is a conversational Q&A interface built on Azure OpenAI Assi
 
 Supported data sources: **Lakehouse, Warehouse, KQL Database, Power BI Semantic Model, Ontology, Microsoft Graph**. A single agent supports up to **5 data sources in any combination**.
 
-Read-only by design — it never generates create/update/delete queries.
+Read-only by design - it never generates create/update/delete queries.
 
 ---
 
 ## When you use this vs. Semantic Model AI Instructions
 
-- **Data Agent** — conversational chat surface. Multi-turn interactions, multi-source routing, query orchestration, response formatting. End users interact with this directly.
-- **Semantic Model AI Instructions** — guidance attached to a single semantic model. Applies wherever Copilot consumes that model (reports, Q&A, Copilot pane).
+- **Data Agent** - conversational chat surface. Multi-turn interactions, multi-source routing, query orchestration, response formatting. End users interact with this directly.
+- **Semantic Model AI Instructions** - guidance attached to a single semantic model. Applies wherever Copilot consumes that model (reports, Q&A, Copilot pane).
 
 The two coexist. A data agent can use a semantic model as one of its sources, in which case both sets of instructions are in play. See `configure-ai-semantic-model.md`.
 
@@ -25,11 +25,11 @@ The two coexist. A data agent can use a semantic model as one of its sources, in
 
 ## The four configuration layers
 
-Data agents use a layered instruction architecture. Each layer has a specific job — don't conflate them.
+Data agents use a layered instruction architecture. Each layer has a specific job - don't conflate them.
 
 ### 1. Agent instructions (top-level)
 
-Applies across every data source the agent touches. Microsoft recommends the following markdown structure — author the instructions as a single blob using these headers:
+Applies across every data source the agent touches. Microsoft recommends the following markdown structure - author the instructions as a single blob using these headers:
 
 ```md
 ## Objective
@@ -59,7 +59,7 @@ regions and product categories.
   "show", or "break down".
 - When returning currency values, always include the currency code.
 - When a result has fewer than 5 rows, describe it in prose instead of a table.
-- If a question is ambiguous (e.g., "sales" — gross or net?), ask one
+- If a question is ambiguous (e.g., "sales" - gross or net?), ask one
   clarifying question before answering.
 
 ## Handling common topics
@@ -77,14 +77,14 @@ Keep this blob focused on cross-source routing and business-wide terminology. So
 
 ### 2. Data source instructions (per-source)
 
-Applies only when the agent routes a question to that specific source. This is where source-specific query logic belongs — **not** in the agent-level blob.
+Applies only when the agent routes a question to that specific source. This is where source-specific query logic belongs - **not** in the agent-level blob.
 
 Microsoft's recommended structure:
 
 ```md
 ## General knowledge
 This lakehouse contains all POS transactions from our retail stores and our
-e-commerce site. It does not contain wholesale orders — those live in the
+e-commerce site. It does not contain wholesale orders - those live in the
 B2B warehouse. Data is refreshed nightly; expect a 24-hour lag.
 
 ## Table descriptions
@@ -99,7 +99,7 @@ B2B warehouse. Data is refreshed nightly; expect a 24-hour lag.
 
 ## When asked about
 - **Returns**: filter `sales_fact` to `return_flag = 1`. Do NOT use negative
-  quantities to identify returns — we store returns as separate rows.
+  quantities to identify returns - we store returns as separate rows.
 - **Online vs in-store**: use `channel` on `sales_fact`. Don't infer from
   store attributes.
 - **New product performance**: join `product_dim` and filter to products where
@@ -123,18 +123,18 @@ A short summary the agent uses to **decide which source to route a question to**
 Good descriptions:
 
 ```text
-SalesLakehouse — All retail POS and e-commerce transactions since 2021, at
+SalesLakehouse - All retail POS and e-commerce transactions since 2021, at
 line-item grain. Use for any question about units sold, revenue at the
 transaction level, store performance, channel mix, or product sell-through.
 
-FinanceWarehouse — Monthly aggregated financial data: revenue, cost of goods
+FinanceWarehouse - Monthly aggregated financial data: revenue, cost of goods
 sold, operating expense, margin, budget, and variance. Use for any P&L-shaped
 question or anything involving budget vs. actual.
 
-CustomerModel — Power BI semantic model with customer segmentation, loyalty
+CustomerModel - Power BI semantic model with customer segmentation, loyalty
 tier, lifetime value, and churn scores. Use for any question that asks
 "which customers" or "what kind of customers". Do NOT use for transaction
-details — route those to SalesLakehouse.
+details - route those to SalesLakehouse.
 ```
 
 Weak descriptions ("contains sales data") make the agent guess at routing. Always say what the source IS good for AND what it ISN'T.
@@ -190,10 +190,10 @@ One well-chosen example can outperform paragraphs of prose instructions.
 
 When the agent decides what to do, layers override each other in this order (highest precedence first):
 
-1. **Organizational intent** — tenant policies, Purview DLP, access restriction policies, compliance requirements. Can't be overridden.
-2. **Role-based intent** — workspace governance, permission boundaries, RLS/CLS on semantic models.
-3. **Developer intent** — your agent instructions, data source instructions, example queries.
-4. **User intent** — the question in the chat.
+1. **Organizational intent** - tenant policies, Purview DLP, access restriction policies, compliance requirements. Can't be overridden.
+2. **Role-based intent** - workspace governance, permission boundaries, RLS/CLS on semantic models.
+3. **Developer intent** - your agent instructions, data source instructions, example queries.
+4. **User intent** - the question in the chat.
 
 If your developer instructions conflict with a higher layer (e.g., tell the agent to access a restricted column), the agent refuses or redirects. Don't try to write around policy in the instructions blob.
 
@@ -204,7 +204,7 @@ If your developer instructions conflict with a higher layer (e.g., tell the agen
 - **Scope each instruction to the right layer.** Source-specific guidance in the top-level blob creates noise. Generic business context duplicated across every data source blob creates drift.
 - **Keep layers focused and non-contradictory.** Conflicts between layers cause the LLM to hedge or hallucinate.
 - **Iterate against real questions.** Write, test, observe failures, adjust. Don't assume a single pass is sufficient.
-- **Version control the instructions** alongside the rest of the data platform code. Treat them as first-class artifacts — use Git integration on the Fabric workspace to track changes.
+- **Version control the instructions** alongside the rest of the data platform code. Treat them as first-class artifacts - use Git integration on the Fabric workspace to track changes.
 - **Use example queries aggressively** on lakehouse/warehouse/KQL sources. They are the single most effective configuration mechanism for query accuracy.
 - **Maintain a regression question bank.** When instructions change, re-run the bank and check for accuracy drift.
 - **Use deployment pipelines** to promote agent changes through dev/test/prod.
@@ -217,10 +217,10 @@ If your developer instructions conflict with a higher layer (e.g., tell the agen
 - Stuffing everything into the top-level agent blob and leaving the data source blobs empty. The layers exist for a reason.
 - Data source descriptions that are too generic. "Contains sales data" doesn't help routing.
 - Missing example queries. Without them, the agent guesses at query structure.
-- Adding example queries to a Power BI semantic model data source (not supported — the UI won't stop you in all flows, but they have no effect).
-- Instructions referencing deprecated tables, columns, or measures. Stale instructions are worse than none — they actively mislead the agent.
+- Adding example queries to a Power BI semantic model data source (not supported - the UI won't stop you in all flows, but they have no effect).
+- Instructions referencing deprecated tables, columns, or measures. Stale instructions are worse than none - they actively mislead the agent.
 - Duplicating rules across agent, data source, and semantic model layers. Pick the most specific layer and leave the others clean.
-- Treating the agent-level "Response guidelines" as a place for business logic. It's for conversational behavior — tone, clarification flows, disclaimers.
+- Treating the agent-level "Response guidelines" as a place for business logic. It's for conversational behavior - tone, clarification flows, disclaimers.
 - Non-English content in instructions or example queries. Data agents don't currently support non-English languages; authoring in other languages degrades quality.
 
 ---
@@ -228,11 +228,11 @@ If your developer instructions conflict with a higher layer (e.g., tell the agen
 ## Limitations to be aware of
 
 - **Read-only**: generates SELECT-equivalent queries only. No create/update/delete.
-- **Structured data only**: no `.pdf`, `.docx`, `.txt`. For lakehouse sources, only tables are queried — standalone files under `Files/` are not read unless exposed as tables.
+- **Structured data only**: no `.pdf`, `.docx`, `.txt`. For lakehouse sources, only tables are queried - standalone files under `Files/` are not read unless exposed as tables.
 - **5 data sources max per agent**.
 - **100 example queries max per data source**.
 - **No example queries on Power BI semantic model data sources**.
-- **Response row/column cap**: agent responses are capped at 25 rows and 25 columns to keep chat output concise. Previous chat history can influence the cap on follow-ups — start a new chat if you need a clean context.
+- **Response row/column cap**: agent responses are capped at 25 rows and 25 columns to keep chat output concise. Previous chat history can influence the cap on follow-ups - start a new chat if you need a clean context.
 - **English only**: no current non-English language support.
 - **LLM is fixed**: you can't change the underlying LLM.
 - **Same-region requirement**: a data source's workspace capacity must be in the same region as the data agent's workspace capacity. Cross-region queries fail.
@@ -244,7 +244,7 @@ If your developer instructions conflict with a higher layer (e.g., tell the agen
 
 ## Full worked example
 
-Everything below belongs to a single data agent configured against a retail/commerce data estate. Replace names and domain-specific terms with your own — the structure is the reusable part.
+Everything below belongs to a single data agent configured against a retail/commerce data estate. Replace names and domain-specific terms with your own - the structure is the reusable part.
 
 **Agent instructions blob:**
 
@@ -254,9 +254,9 @@ Help users analyze retail sales performance, customer behavior, and financial
 results across regions, channels, and product categories.
 
 ## Data sources
-- `SalesLakehouse` — transactional POS and e-commerce data.
-- `FinanceWarehouse` — monthly aggregated financial data.
-- `CustomerModel` — Power BI semantic model with segmentation and loyalty.
+- `SalesLakehouse` - transactional POS and e-commerce data.
+- `FinanceWarehouse` - monthly aggregated financial data.
+- `CustomerModel` - Power BI semantic model with segmentation and loyalty.
 - Prefer `CustomerModel` for customer-facing attributes; only drop to
   `SalesLakehouse` when the user asks for transaction-level detail.
 
@@ -284,7 +284,7 @@ results across regions, channels, and product categories.
 ```text
 All retail POS and e-commerce transactions since 2021, at line-item grain.
 Use for questions about units sold, store performance, channel mix, returns,
-or product sell-through. Do not use for aggregated financials — use
+or product sell-through. Do not use for aggregated financials - use
 FinanceWarehouse instead.
 ```
 
@@ -292,17 +292,17 @@ FinanceWarehouse instead.
 
 ```md
 ## General knowledge
-POS + e-commerce transactions. Wholesale orders are NOT here — those live in
+POS + e-commerce transactions. Wholesale orders are NOT here - those live in
 the B2B warehouse. Data refreshes nightly; expect a 24-hour lag.
 
 ## Table descriptions
-- `sales_fact` — one row per line item. Columns: store_id, product_id,
+- `sales_fact` - one row per line item. Columns: store_id, product_id,
   customer_id, sale_date, quantity, unit_price, discount_amount, channel,
   return_flag.
-- `product_dim` — catalog. Columns: product_id, category, subcategory, brand,
+- `product_dim` - catalog. Columns: product_id, category, subcategory, brand,
   launch_date, is_active.
-- `store_dim` — stores. Columns: store_id, region, country, store_format.
-- `date_dim` — calendar with fiscal mapping. Join on `sale_date`.
+- `store_dim` - stores. Columns: store_id, region, country, store_format.
+- `date_dim` - calendar with fiscal mapping. Join on `sale_date`.
 
 ## When asked about
 - Returns: filter `return_flag = 1`. Returns are separate rows, NOT negative
@@ -335,12 +335,12 @@ ORDER BY net_sales DESC;
 
 ## Key differences from Semantic Model AI Instructions
 
-- **Structure** — data agent has 4 configuration layers; semantic model has one unstructured text blob.
-- **Multi-source** — data agent routes across up to 5 sources; semantic model instructions apply to exactly one model.
-- **Example queries / few-shot** — data agent supports them on lakehouse/warehouse/KQL sources (not on semantic model sources); semantic model instructions don't support few-shot.
-- **Response formatting and conversational behavior** — configurable in the data agent; explicitly out of scope for semantic model instructions.
-- **Character limit** — semantic model is capped at 10,000 characters; data agent doesn't document a single hard limit but each layer has practical length constraints.
-- **Consumption surface** — data agent instructions apply only in the agent chat; semantic model instructions apply everywhere Copilot uses the model (reports, Q&A, Copilot chat).
+- **Structure** - data agent has 4 configuration layers; semantic model has one unstructured text blob.
+- **Multi-source** - data agent routes across up to 5 sources; semantic model instructions apply to exactly one model.
+- **Example queries / few-shot** - data agent supports them on lakehouse/warehouse/KQL sources (not on semantic model sources); semantic model instructions don't support few-shot.
+- **Response formatting and conversational behavior** - configurable in the data agent; explicitly out of scope for semantic model instructions.
+- **Character limit** - semantic model is capped at 10,000 characters; data agent doesn't document a single hard limit but each layer has practical length constraints.
+- **Consumption surface** - data agent instructions apply only in the agent chat; semantic model instructions apply everywhere Copilot uses the model (reports, Q&A, Copilot chat).
 
 ---
 

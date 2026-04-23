@@ -1,4 +1,4 @@
-# Notebooks are JSON — pin to LF so the metadata-scrubber hook is idempotent
+# Notebooks are JSON - pin to LF so the metadata-scrubber hook is idempotent
 # regardless of core.autocrlf on the local clone.
 *.ipynb       text eol=lf
 
