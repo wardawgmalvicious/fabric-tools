@@ -2,6 +2,12 @@
 # Wrapper around DuckDB for exploring Fabric OneLake delta tables with
 # Azure CLI auth (`az login` token, via credential_chain = cli).
 #
+# Auth note: DuckDB requests a token for the storage.azure.com audience.
+# Under Conditional Access, a plain `az login` (ARM scope) may not be
+# enough — `az account show` works but `az account get-access-token
+# --resource https://storage.azure.com` fails. Fix:
+#   az login --scope https://storage.azure.com/.default
+#
 # Usage:
 #   # Quick one-liner — the delta/azure extensions and the azure secret are
 #   # pre-loaded, so you can go straight to delta_scan / read_parquet.
