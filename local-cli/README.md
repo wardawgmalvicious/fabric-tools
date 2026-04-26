@@ -49,21 +49,31 @@ az account set --subscription <subscription-id>   # optional, scope to the right
 
 No SAS keys, no service principal secrets, no connection-string passwords. Token lifetime follows your `az` session — re-run `az login` if a script suddenly returns 401.
 
+**Auth gotcha**: DuckDB requests a token for the `https://storage.azure.com` audience. Under Conditional Access, a plain `az login` may give you an ARM-scoped session that silently fails to mint a storage token (you'll see `'az account get-access-token' command failed: ERROR: Please run 'az login'` even though `az account show` works). Fix with a scoped login:
+
+```bash
+az login --scope https://storage.azure.com/.default
+```
+
 ## Deployment into a client repo
 
 1. Copy both files into the client repo:
+
    ```
    <client-repo>/scripts/data/sql.sh
    <client-repo>/scripts/data/lake.sh
    ```
+
    (Both scripts assume this exact two-deep location — they resolve the repo root via `SCRIPT_DIR/../..` to find `.env`.)
 
 2. Make them executable: `chmod +x scripts/data/*.sh` (no-op on Windows but matters if anyone clones on macOS/Linux).
 
 3. For `sql.sh`, add the connection string to the client repo's `.env`:
+
    ```env
    SQL_CONNECTION_STRING=Server=tcp:<server>.database.fabric.microsoft.com,1433;Initial Catalog=<database>;Encrypt=True;
    ```
+
    The script only parses `Server=` and `Initial Catalog=` — the rest of the connection string is ignored, so paste whatever Fabric gives you.
 
 4. **If the client repo already uses a different env var name** (e.g., `DAB_CONNECTION_STRING`, `FABRIC_SQL_CONN`), edit the `CONN_VAR="SQL_CONNECTION_STRING"` line near the top of `sql.sh` to match. There's an inline comment at that line marking it as the rename point.
