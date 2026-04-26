@@ -30,6 +30,10 @@ fabric-tools/
 │   ├── configure-ai-semantic-model.md
 │   ├── configure-data-agent.md
 │   └── README.md
+├── local-cli/          # Local-workstation CLI wrappers (sqlcmd, DuckDB) for ad-hoc Fabric data exploration
+│   ├── lake.sh
+│   ├── sql.sh
+│   └── README.md
 ├── .githooks/          # Opt-in pre-commit hook that strips Fabric metadata from notebooks
 └── README.md
 ```
