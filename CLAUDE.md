@@ -31,6 +31,7 @@ Notebooks downloaded from Fabric carry workspace-bound metadata — default lake
 
 - **Top-level metadata kept:** `language_info`, `kernel_info`, `microsoft` (Fabric uses `microsoft.language` to route `%%sql` / `%%pyspark`).
 - **Per-cell metadata kept:** `microsoft` only. All cell `outputs` are emptied and `execution_count` reset to `null`.
+- **Cell `source` normalized to array-of-strings.** Jupyter accepts a bare string; Fabric's notebook importer does not — it fails with `400 Bad Request` / `pbi.error.exceptionCulprit: 1` and no further detail. The scrubber re-shapes without altering text (joining the array reproduces the original exactly). Cells authored programmatically rather than round-tripped through Fabric are the usual source of the bare-string form.
 
 The scrubber is idempotent and preserves Jupyter/Fabric key ordering to keep diffs minimal. `.gitattributes` pins `*.ipynb` to `eol=lf` so scrubbing stays idempotent regardless of `core.autocrlf`. When editing notebooks, do not reintroduce stripped keys.
 
