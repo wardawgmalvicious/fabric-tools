@@ -8,8 +8,9 @@ Rewrites a .ipynb in place so only language-related metadata survives.
 Removes notebook-level dependencies (bound lakehouse/warehouse/environment),
 a365ComputeOptions, sessionKeepAliveTimeout, nteract, and spark_compute
 (which carries compute_id / session_options). At the cell level, resets
-outputs and execution_count and drops every per-cell metadata key except
-the ones on the allowlist.
+outputs and execution_count, drops every per-cell metadata key except the
+ones on the allowlist, and normalizes `source` to the array-of-strings form
+Fabric's notebook importer requires.
 
 Idempotent - running twice on the same file is a no-op.
 
@@ -45,6 +46,32 @@ function ConvertTo-OrderedMetadata {
   return $out
 }
 
+function ConvertTo-SourceLines {
+  <#
+    Normalizes a cell's `source` to array-of-strings form. Jupyter accepts a
+    bare string, but Fabric's uploadNotebook / createArtifact rejects it with
+    `400 Bad Request` + `pbi.error.exceptionCulprit: 1` and no further detail.
+    Cells authored programmatically (rather than round-tripped through Fabric)
+    are the usual source of the bare-string form.
+
+    Splits after each newline and keeps it, so joining the result reproduces
+    the input exactly - the text is never altered, only re-shaped. Already
+    normalized arrays round-trip unchanged, keeping the scrubber idempotent.
+
+    Every `return` uses the comma operator - without it PowerShell unrolls a
+    single-element array to a scalar and an empty one to $null, which would
+    re-emit exactly the bare-string (or null) source we are here to prevent.
+  #>
+  param($Source)
+
+  if ($null -eq $Source) { return , @() }
+  $text = if ($Source -is [string]) { $Source } else { -join $Source }
+  if ($text.Length -eq 0) { return , @() }
+
+  $lines = [regex]::Matches($text, '[^\n]*\n|[^\n]+') | ForEach-Object { $_.Value }
+  return , @($lines)
+}
+
 function ConvertTo-ScrubbedCell {
   param($Cell)
   $type = $Cell['cell_type']
@@ -57,7 +84,7 @@ function ConvertTo-ScrubbedCell {
   if ($Cell.Contains('id')) { $out['id'] = $Cell['id'] }
   $out['metadata'] = $cellMeta
   if ($type -eq 'code') { $out['outputs'] = @() }
-  $out['source'] = $Cell['source']
+  $out['source'] = ConvertTo-SourceLines -Source $Cell['source']
   return $out
 }
 
