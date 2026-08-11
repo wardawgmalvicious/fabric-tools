@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A curated collection of Microsoft Fabric **notebooks**, **shell-script templates**, and **markdown configuration guides** for platform engineering. There is no application to build, no test suite, and no package to install — artifacts are imported into a Fabric workspace (notebooks), copied into client repos (`local-cli/`), or pasted into Fabric Copilot surfaces (`guides/`). Treat each file as a standalone deliverable.
 
-The guiding philosophy is **SPN-first, parameterized, CI/CD-ready**: everything authenticates via service principal, nothing hardcodes environment-specific GUIDs, and operations are built to slot into automated pipelines rather than depend on interactive portal clicks.
+The guiding philosophy is **SP-first, parameterized, CI/CD-ready**: everything authenticates via service principal, nothing hardcodes environment-specific GUIDs, and operations are built to slot into automated pipelines rather than depend on interactive portal clicks.
 
 ## Commands
 
@@ -37,8 +37,8 @@ The scrubber is idempotent and preserves Jupyter/Fabric key ordering to keep dif
 
 ## Architecture
 
-### admin/ — SPN provisioning (the `%run` module pattern)
-[admin/nb_spn_common.ipynb](admin/nb_spn_common.ipynb) is the base module: it reads SPN credentials (`tenantId`/`clientId`/`clientSecret`) from Azure Key Vault via `notebookutils.credentials.getSecret`, acquires a Fabric API token (MSAL / client-credentials, audience `https://api.fabric.microsoft.com`), and defines shared helpers (`get_access_token`, `get_capacity_id`, `get_item_id_by_name`, ...). The other three admin notebooks (`nb_spn_create_item`, `nb_spn_identity`, `nb_spn_mirror`) `%run` it in their first cell and call the helpers directly. Run `nb_spn_common` standalone only to test Key Vault / token plumbing.
+### admin/ — SP provisioning (the `%run` module pattern)
+[admin/nb_sp_common.ipynb](admin/nb_sp_common.ipynb) is the base module: it reads SP credentials (`tenantId`/`clientId`/`clientSecret`) from Azure Key Vault via `notebookutils.credentials.getSecret`, acquires a Fabric API token (MSAL / client-credentials, audience `https://api.fabric.microsoft.com`), and defines shared helpers (`get_access_token`, `get_capacity_id`, `get_item_id_by_name`, ...). The other three admin notebooks (`nb_sp_create_item`, `nb_sp_identity`, `nb_sp_mirror`) `%run` it in their first cell and call the helpers directly. Run `nb_sp_common` standalone only to test Key Vault / token plumbing.
 
 ### maintenance/ — idempotent Lakehouse ops
 `nb_lh_optimize` (OPTIMIZE + VACUUM), `nb_lh_configure` (Delta `TBLPROPERTIES`, reads current values and skips unchanged tables), `nb_spark_config` (session tuning). Safe to schedule; these never mutate schema or item metadata.
@@ -53,7 +53,7 @@ e.g. `nb_salesforce_ingest`. Authenticate to a third-party API (secrets from Key
 Markdown for the semantic-model AI-instructions blob and Data Agent configuration. Replace the illustrative retail/sales examples with the target domain without changing structure. Each tracks its Microsoft Learn source + last-updated date.
 
 ### local-cli/ — workstation CLI wrappers (templates, not run in-place)
-[sql.sh](local-cli/sql.sh) (sqlcmd over any AAD T-SQL endpoint) and [lake.sh](local-cli/lake.sh) (DuckDB over OneLake Delta). Unlike everything else, these run on a developer's machine and auth via the **Azure CLI session** (`az login`), no SPN/SAS. They are meant to be copied into a client repo at `scripts/data/` — both resolve the repo root via `SCRIPT_DIR/../..`, so that two-deep location is load-bearing. `sql.sh` parses only `Server=` / `Initial Catalog=` from `<repo>/.env` (`CONN_VAR` near the top is the documented rename point); `lake.sh` takes connection details inline in the ABFSS URL.
+[sql.sh](local-cli/sql.sh) (sqlcmd over any AAD T-SQL endpoint) and [lake.sh](local-cli/lake.sh) (DuckDB over OneLake Delta). Unlike everything else, these run on a developer's machine and auth via the **Azure CLI session** (`az login`), no SP/SAS. They are meant to be copied into a client repo at `scripts/data/` — both resolve the repo root via `SCRIPT_DIR/../..`, so that two-deep location is load-bearing. `sql.sh` parses only `Server=` / `Initial Catalog=` from `<repo>/.env` (`CONN_VAR` near the top is the documented rename point); `lake.sh` takes connection details inline in the ABFSS URL.
 
 ## Conventions when editing notebooks
 

@@ -13,7 +13,7 @@ Helper notebooks that support CI/CD and environment management. These are not wo
 - Fabric notebooks runtime (PySpark)
 - `notebookutils` (for current-workspace resolution)
 - A Variable Library item in the target workspace (when `UPDATE_VARIABLE_LIBRARY = True`)
-- SPN or user token with write access to the Variable Library
+- SP or user token with write access to the Variable Library
 
 ## Usage Pattern
 
