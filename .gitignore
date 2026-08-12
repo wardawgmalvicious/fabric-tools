@@ -1,5 +1,6 @@
-# Claude Code
-.claude/
+# Claude Code (commit shared .claude/settings.json; keep personal overrides local)
+.claude/*
+!.claude/settings.json
 
 # Python
 __pycache__/
