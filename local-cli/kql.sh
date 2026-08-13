@@ -53,8 +53,11 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 # Extract values without sourcing (.env may contain entries bash would choke on).
+# `|| true` is load-bearing: under `set -o pipefail` a grep that matches nothing
+# fails the pipeline, so a missing key would abort the script under `set -e`
+# before the explicit check below could print a useful message.
 env_value() {
-    grep -E "^$1=" "$ENV_FILE" | head -n 1 | cut -d '=' -f 2- | tr -d '\r'
+    { grep -E "^$1=" "$ENV_FILE" || true; } | head -n 1 | cut -d '=' -f 2- | tr -d '\r'
 }
 
 CLUSTER=$(env_value KUSTO_CLUSTER_URI)
