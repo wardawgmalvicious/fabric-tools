@@ -1,23 +1,55 @@
 #!/usr/bin/env bash
 # Wrapper around modern `sqlcmd` for any AAD-authenticated T-SQL endpoint —
-# Fabric SQL Database, Fabric Warehouse / Lakehouse SQL endpoint, Azure SQL
-# Database, Azure SQL Managed Instance, Synapse dedicated pool. Reads the
-# connection string from the repo's .env via SQL_CONNECTION_STRING and
-# authenticates with the Azure CLI token (`az login`).
+# Fabric Warehouse, Fabric Lakehouse SQL analytics endpoint, Fabric SQL
+# Database, Azure SQL Database / Managed Instance, Synapse dedicated pool.
+# Authenticates with the Azure CLI token (`az login`).
+#
+# ONE SCRIPT, NOT ONE PER ENDPOINT TYPE. A Fabric workspace exposes a single
+# SQL host, and the "database" is just the item display name — the same host
+# serves the Warehouse and the Lakehouse SQL endpoint. So a separate warehouse
+# script would be this file with a different -d, and you would still want a
+# third one the day you query the lakehouse endpoint. lake.sh and kql.sh are
+# separate because they drive genuinely different tools (duckdb, curl+jq);
+# everything reachable by sqlcmd belongs here.
+#
+# .env configuration — one entry per endpoint, name it whatever you like:
+#
+#   SQL_ENDPOINT_<NAME>=<host>[/<database>]        # bare host, Fabric style
+#   SQL_ENDPOINT_<NAME>=<ADO.NET connection string> # Server=...;Initial Catalog=...;
+#   SQL_ENDPOINT_DEFAULT=<NAME>                     # which one -e defaults to
+#
+# Both value shapes are accepted because the portal hands out both: Fabric
+# Warehouse gives a bare host with no database (the database is the item name,
+# which the portal never puts in the string), while Fabric SQL Database and
+# Azure SQL give a full ADO.NET string. Normalising by hand is exactly the step
+# that gets skipped, so the script does it.
+#
+#   SQL_ENDPOINT_FABRIC=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+#   SQL_ENDPOINT_AZURE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;
+#   SQL_ENDPOINT_DEFAULT=FABRIC
 #
 # Usage:
-#   scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"
+#   scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"   # default endpoint
+#   scripts/data/sql.sh -e azure -Q "SELECT 1"                      # named endpoint
+#   scripts/data/sql.sh -d <LakehouseName> -Q "SELECT 1"            # same host, other item
 #   scripts/data/sql.sh -i path/to/script.sql
 #   echo "SELECT 1" | scripts/data/sql.sh
+#   scripts/data/sql.sh -l                                          # list configured endpoints
 #
-# Any extra flags are passed through to sqlcmd.
+# -e/-d/-l are consumed here; every other flag passes straight to sqlcmd. -d
+# keeps sqlcmd's own meaning (database), so there is nothing new to remember.
 #
 # Deployment assumption: this script lives at <client-repo>/scripts/data/sql.sh
 # so SCRIPT_DIR/../.. resolves to the repo root containing .env.
 
 set -euo pipefail
 
-# Resolve repo root (script lives in <repo>/scripts/data/).
+if ! command -v sqlcmd >/dev/null 2>&1; then
+    echo "error: sqlcmd not found on PATH" >&2
+    echo "hint: winget install Microsoft.Sqlcmd" >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
@@ -27,30 +59,118 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-# Env var holding the full ADO.NET-style connection string. Rename here to
-# match an existing client .env convention (e.g., DAB_CONNECTION_STRING) if needed.
-CONN_VAR="SQL_CONNECTION_STRING"
+# Read values without sourcing — .env may hold entries bash would choke on.
+# The `|| true` is required, not defensive: under `set -o pipefail` a grep that
+# matches nothing fails the whole pipeline, so a simple "is this key absent?"
+# lookup would abort the script under `set -e` before it could report anything.
+env_value() {
+    { grep -E "^$1=" "$ENV_FILE" || true; } | head -n 1 | cut -d '=' -f 2- | tr -d '\r'
+}
 
-# Extract the raw connection string value without sourcing (.env may contain
-# other entries with characters bash would choke on).
-CONN=$(grep -E "^${CONN_VAR}=" "$ENV_FILE" | head -n 1 | cut -d '=' -f 2-)
+list_endpoints() {
+    grep -oE '^SQL_ENDPOINT_[A-Za-z0-9_]+' "$ENV_FILE" 2>/dev/null \
+        | sed 's/^SQL_ENDPOINT_//' | grep -v '^DEFAULT$' || true
+}
 
-if [[ -z "${CONN:-}" ]]; then
-    echo "error: ${CONN_VAR} not set in $ENV_FILE" >&2
+ENDPOINT=""
+DATABASE_OVERRIDE=""
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -e) ENDPOINT="$2"; shift 2 ;;
+        -d) DATABASE_OVERRIDE="$2"; shift 2 ;;
+        -l)
+            DEFAULT_NAME=$(env_value SQL_ENDPOINT_DEFAULT)
+            echo "endpoints configured in $ENV_FILE:"
+            found=0
+            while read -r name; do
+                [[ -z "$name" ]] && continue
+                found=1
+                marker="  "
+                [[ "${name^^}" == "${DEFAULT_NAME^^}" ]] && marker="* "
+                printf '%s%-14s %s\n' "$marker" "$name" "$(env_value "SQL_ENDPOINT_$name")"
+            done < <(list_endpoints)
+            [[ "$found" -eq 0 ]] && echo "  (none — see the header of this script for the format)"
+            exit 0 ;;
+        *) ARGS+=("$1"); shift ;;
+    esac
+done
+
+# Resolve which endpoint entry to use: -e, then SQL_ENDPOINT_DEFAULT, then the
+# only one defined if there is exactly one (the common single-endpoint repo).
+if [[ -z "$ENDPOINT" ]]; then
+    ENDPOINT=$(env_value SQL_ENDPOINT_DEFAULT)
+fi
+if [[ -z "$ENDPOINT" ]]; then
+    mapfile -t _names < <(list_endpoints)
+    if [[ ${#_names[@]} -eq 1 ]]; then
+        ENDPOINT="${_names[0]}"
+    fi
+fi
+
+CONN=""
+if [[ -n "$ENDPOINT" ]]; then
+    CONN=$(env_value "SQL_ENDPOINT_${ENDPOINT^^}")
+    [[ -z "$CONN" ]] && CONN=$(env_value "SQL_ENDPOINT_${ENDPOINT}")
+fi
+
+# Legacy single-slot variable. Kept working so an existing .env is not a hard
+# break, but it cannot name more than one endpoint — hence the nudge.
+if [[ -z "$CONN" ]]; then
+    CONN=$(env_value SQL_CONNECTION_STRING)
+    if [[ -n "$CONN" ]]; then
+        echo "note: using legacy SQL_CONNECTION_STRING. Rename it to" >&2
+        echo "      SQL_ENDPOINT_<NAME> to configure more than one endpoint (-l lists them)." >&2
+    fi
+fi
+
+if [[ -z "$CONN" ]]; then
+    echo "error: no endpoint configured in $ENV_FILE" >&2
+    if [[ -n "$ENDPOINT" ]]; then
+        echo "       looked for SQL_ENDPOINT_${ENDPOINT^^}" >&2
+    fi
+    echo "       expected SQL_ENDPOINT_<NAME>=<host>[/<database>] or an ADO.NET string" >&2
+    echo "       run with -l to list what is defined" >&2
     exit 1
 fi
 
-# Parse Server= and Initial Catalog= from the connection string.
-SERVER=$(printf '%s' "$CONN" | grep -oiE 'Server=[^;]+' | head -n1 | cut -d '=' -f2-)
-DATABASE=$(printf '%s' "$CONN" | grep -oiE 'Initial Catalog=[^;]+' | head -n1 | cut -d '=' -f2-)
+# Two accepted shapes. An ADO.NET string is detected by its Server= key rather
+# than by guessing from punctuation — Fabric hosts contain dots and dashes and
+# would defeat anything cleverer.
+if grep -qiE '(^|;)[[:space:]]*Server[[:space:]]*=' <<<"$CONN"; then
+    SERVER=$(grep -oiE '(^|;)[[:space:]]*Server[[:space:]]*=[^;]+' <<<"$CONN" | head -n1 | cut -d '=' -f2- | sed 's/^[[:space:]]*//')
+    DATABASE=$(grep -oiE '(^|;)[[:space:]]*(Initial Catalog|Database)[[:space:]]*=[^;]+' <<<"$CONN" | head -n1 | cut -d '=' -f2- | sed 's/^[[:space:]]*//')
+else
+    SERVER="${CONN%%/*}"
+    if [[ "$CONN" == */* ]]; then
+        DATABASE="${CONN#*/}"
+    else
+        DATABASE=""
+    fi
+fi
 
-if [[ -z "$SERVER" || -z "$DATABASE" ]]; then
-    echo "error: failed to parse Server/Initial Catalog from ${CONN_VAR}" >&2
+[[ -n "$DATABASE_OVERRIDE" ]] && DATABASE="$DATABASE_OVERRIDE"
+
+if [[ -z "$SERVER" ]]; then
+    echo "error: could not determine a server from the endpoint value" >&2
+    exit 1
+fi
+if [[ -z "$DATABASE" ]]; then
+    # Fabric's Warehouse connection string genuinely omits this, and sqlcmd would
+    # otherwise connect to master and fail on the first schema-qualified name.
+    echo "error: no database for endpoint '${ENDPOINT:-<legacy>}'" >&2
+    echo "       Fabric's copied connection string omits it — the database is the ITEM" >&2
+    echo "       DISPLAY NAME (the Warehouse or Lakehouse name as shown in the workspace)." >&2
+    echo "       Append it as <host>/<database> in .env, or pass -d <database>." >&2
     exit 1
 fi
 
-exec sqlcmd \
-    -S "$SERVER" \
-    -d "$DATABASE" \
-    --authentication-method ActiveDirectoryAzCli \
-    "$@"
+# Don't fight an explicit choice: only supply the default auth method if the
+# caller has not passed one through.
+AUTH=(--authentication-method ActiveDirectoryAzCli)
+for arg in ${ARGS+"${ARGS[@]}"}; do
+    [[ "$arg" == --authentication-method* ]] && AUTH=()
+done
+
+exec sqlcmd -S "$SERVER" -d "$DATABASE" ${AUTH+"${AUTH[@]}"} ${ARGS+"${ARGS[@]}"}
