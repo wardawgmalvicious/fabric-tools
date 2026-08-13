@@ -8,7 +8,7 @@ These are templates. Copy them into a client repo at `scripts/data/` and use the
 
 | File | Purpose |
 |---|---|
-| [sql.sh](sql.sh) | `sqlcmd` wrapper for any AAD-authenticated T-SQL endpoint (see *Supported endpoints* below). Reads `Server` and `Initial Catalog` from a connection string in `.env`, then authenticates with the Azure CLI token. |
+| [sql.sh](sql.sh) | `sqlcmd` wrapper for any AAD-authenticated T-SQL endpoint (see *Supported endpoints* below). Reads named `SQL_ENDPOINT_<NAME>` entries from `.env` (bare host or ADO.NET connection string), then authenticates with the Azure CLI token. `-e` picks an endpoint, `-d` overrides the database, `-l` lists what's configured. |
 | [lake.sh](lake.sh) | DuckDB wrapper for OneLake Delta tables. Pre-loads the `delta` and `azure` extensions and creates an Azure secret bound to the Azure CLI credential chain. |
 | [kql.sh](kql.sh) | `curl` + `jq` wrapper around the Kusto query REST API for any AAD-authenticated KQL endpoint — Fabric Eventhouse / KQL database, Azure Data Explorer, Log Analytics ADX proxy. Reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`, then authenticates with the Azure CLI token. |
 | [.env.sample](.env.sample) | Template for the client repo's `.env` — every key the scripts read, with placeholder values. Copied to the **client repo root** (not `scripts/data/`) and filled in. |
@@ -16,6 +16,8 @@ These are templates. Copy them into a client repo at `scripts/data/` and use the
 ### sql.sh — supported endpoints
 
 The wrapper is just a transport: anything `sqlcmd --authentication-method ActiveDirectoryAzCli` can connect to is fair game. That includes:
+
+One script covers all of them deliberately — a Fabric workspace exposes a single SQL host, and the "database" is just the item display name (the same host serves the Warehouse and the Lakehouse SQL endpoint), so per-endpoint-type scripts would be this file with a different `-d`. Multiple endpoints across hosts are handled by named `.env` entries instead (see deployment step 4).
 
 - Fabric SQL Database (`*.database.fabric.microsoft.com`)
 - Fabric Warehouse / Lakehouse SQL endpoint (`*.datawarehouse.fabric.microsoft.com`)
@@ -85,15 +87,17 @@ az login --scope "https://<cluster>.<region>.kusto.fabric.microsoft.com/.default
 
 3. Copy [.env.sample](.env.sample) to the **client repo root** as `.env` and fill in the values (per-key details in the next two steps). The scripts resolve `.env` two levels above `scripts/data/`, so the repo root is the one location that works. Check the client repo's `.gitignore` covers `.env` — the sample is committable, the filled-in copy never is.
 
-4. For `sql.sh`, fill in the connection string:
+4. For `sql.sh`, define one `SQL_ENDPOINT_<NAME>` entry per endpoint (name them whatever you like):
 
    ```env
-   SQL_CONNECTION_STRING=Server=tcp:<server>.database.fabric.microsoft.com,1433;Initial Catalog=<database>;Encrypt=True;
+   SQL_ENDPOINT_FABRIC=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+   SQL_ENDPOINT_AZURE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;Encrypt=True;
+   SQL_ENDPOINT_DEFAULT=FABRIC
    ```
 
-   The script only parses `Server=` and `Initial Catalog=` — the rest of the connection string is ignored, so paste whatever Fabric gives you.
+   Both value shapes are accepted because the portal hands out both: Fabric Warehouse / Lakehouse SQL endpoint gives a bare host with no database — the database is the **item display name**, which the portal never puts in the string, so append it yourself as `<host>/<database>` (or pass `-d` at run time). Fabric SQL Database and Azure SQL give a full ADO.NET string; only `Server=` and `Initial Catalog=`/`Database=` are parsed, the rest is ignored. `SQL_ENDPOINT_DEFAULT` names the endpoint used when `-e` isn't passed; with exactly one endpoint defined it's optional. `sql.sh -l` lists what's configured.
 
-5. **If the client repo already uses a different env var name** (e.g., `DAB_CONNECTION_STRING`, `FABRIC_SQL_CONN`), edit the `CONN_VAR="SQL_CONNECTION_STRING"` line near the top of `sql.sh` to match. There's an inline comment at that line marking it as the rename point.
+5. **If the client repo already has a legacy `SQL_CONNECTION_STRING`**, it still works — the script falls back to it with a note on stderr suggesting the rename. Rename it to `SQL_ENDPOINT_<NAME>` when you want more than one endpoint.
 
 6. For `kql.sh`, fill in the cluster URI and database:
 
@@ -121,8 +125,17 @@ az login --scope "https://<cluster>.<region>.kusto.fabric.microsoft.com/.default
 ### sql.sh
 
 ```bash
-# One-shot query
+# One-shot query against the default endpoint
 scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"
+
+# Pick a named endpoint from .env
+scripts/data/sql.sh -e azure -Q "SELECT 1"
+
+# Same host, different item (e.g. the Lakehouse SQL endpoint on a Fabric host)
+scripts/data/sql.sh -d <LakehouseName> -Q "SELECT 1"
+
+# List configured endpoints (* marks the default)
+scripts/data/sql.sh -l
 
 # Run a .sql file
 scripts/data/sql.sh -i path/to/script.sql
@@ -130,9 +143,11 @@ scripts/data/sql.sh -i path/to/script.sql
 # Pipe from stdin
 echo "SELECT 1" | scripts/data/sql.sh
 
-# Any flags are passed through to sqlcmd
+# Any other flags are passed through to sqlcmd
 scripts/data/sql.sh -Q "SELECT @@VERSION" -h -1 -W
 ```
+
+`-e`/`-d`/`-l` are consumed by the wrapper; everything else goes straight to sqlcmd. `-d` keeps sqlcmd's own meaning (database), so there is nothing new to remember.
 
 ### lake.sh
 
@@ -170,11 +185,11 @@ Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`,
 ```markdown
 ## Local data wrappers (scripts/data/)
 
-- `scripts/data/sql.sh` — sqlcmd wrapper for the repo's T-SQL endpoint (Fabric SQL DB / Fabric Warehouse / Azure SQL DB); reads `<ENV_VAR>` from `.env`, authenticates via `az login`. Usage: `scripts/data/sql.sh -Q "SELECT ..."` or `-i file.sql` or stdin.
+- `scripts/data/sql.sh` — sqlcmd wrapper for the repo's T-SQL endpoints (Fabric SQL DB / Fabric Warehouse / Azure SQL DB); reads `SQL_ENDPOINT_<NAME>` entries from `.env`, authenticates via `az login`. Usage: `scripts/data/sql.sh -Q "SELECT ..."` or `-i file.sql` or stdin; `-e <name>` picks an endpoint, `-d <database>` targets another item on the same host, `-l` lists endpoints.
 - `scripts/data/lake.sh` — DuckDB wrapper for OneLake Delta tables; pre-loads delta/azure extensions and an `az`-CLI-chain secret. Usage: `scripts/data/lake.sh -c "SELECT ... FROM delta_scan('abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<lakehouse>.Lakehouse/Tables/<schema>/<table>')"` or no-args for REPL.
 - `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`, authenticates via `az login`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too.
 - All require an active `az login` session; no SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
 - Prefer these wrappers for ad-hoc data exploration when the user asks to inspect, sample, count, or query repo data.
 ```
 
-Replace `<ENV_VAR>` with whatever name the client repo uses (e.g., `SQL_CONNECTION_STRING`, `DAB_CONNECTION_STRING`) and `<list-known-schemas>` with the actual schemas in the client lakehouse. Drop the T-SQL endpoint flavors that don't apply to the repo.
+Replace `<list-known-schemas>` with the actual schemas in the client lakehouse, and drop the T-SQL endpoint flavors that don't apply to the repo. If the repo has more than one SQL endpoint configured, list the endpoint names and what each serves.
