@@ -7,6 +7,7 @@ Helper notebooks that support CI/CD and environment management. These are not wo
 | Notebook | Purpose |
 |---|---|
 | [nb_extract_guids.ipynb](nb_extract_guids.ipynb) | Enumerate workspace items and write their GUIDs into a Fabric Variable Library. Supports multiple workspaces, multiple value sets, and `__current__` auto-resolution for the running workspace. Optionally updates the Variable Library via the Fabric REST API. |
+| [nb_connection_audit.ipynb](nb_connection_audit.ipynb) | Inventory data connections, flag stale ones by recency, rename them to a naming convention, and take ownership of the ones the caller can already manage. `DRY_RUN`-gated. Bounded by the caller's connection/gateway rights - no self-escalation onto connections it has no role on. |
 
 ## Prerequisites
 
