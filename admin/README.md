@@ -10,7 +10,6 @@ Service principal–driven notebooks for provisioning and managing Fabric worksp
 | [nb_sp_create_item.ipynb](nb_sp_create_item.ipynb) | Create Fabric items (Lakehouse, Warehouse, Notebook, etc.) with SP, polling LROs to completion. |
 | [nb_sp_identity.ipynb](nb_sp_identity.ipynb) | Inspect and manage workspace identities, role assignments, and SP membership. |
 | [nb_sp_mirror.ipynb](nb_sp_mirror.ipynb) | Create and manage Mirrored Database items via SP. |
-| [nb_sp_connections.ipynb](nb_sp_connections.ipynb) | Inventory data connections, grant a principal access (reshare), and rotate stored credentials. Bounded by the SP's own connection/gateway rights - no self-escalation. |
 
 ## Prerequisites
 
