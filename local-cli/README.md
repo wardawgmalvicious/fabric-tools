@@ -8,9 +8,9 @@ These are templates. Copy them into a client repo at `scripts/data/` and use the
 
 | File | Purpose |
 |---|---|
-| [sql.sh](sql.sh) | `sqlcmd` wrapper for any AAD-authenticated T-SQL endpoint (see *Supported endpoints* below). Reads named `SQL_ENDPOINT_<NAME>` entries from `.env` (bare host or ADO.NET connection string), then authenticates with the Azure CLI token. `-e` picks an endpoint, `-d` overrides the database, `-l` lists what's configured. |
-| [lake.sh](lake.sh) | DuckDB wrapper for OneLake Delta tables. Pre-loads the `delta` and `azure` extensions and creates an Azure secret bound to the Azure CLI credential chain. |
-| [kql.sh](kql.sh) | `curl` + `jq` wrapper around the Kusto query REST API for any AAD-authenticated KQL endpoint — Fabric Eventhouse / KQL database, Azure Data Explorer, Log Analytics ADX proxy. Reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`, then authenticates with the Azure CLI token. |
+| [sql.sh](sql.sh) | `sqlcmd` wrapper for any AAD-authenticated T-SQL endpoint (see *Supported endpoints* below). Reads named `SQL_ENDPOINT_<NAME>` entries from `.env` (bare host or ADO.NET connection string), then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-e` picks an endpoint, `-d` overrides the database, `-l` lists what's configured. |
+| [lake.sh](lake.sh) | DuckDB wrapper for OneLake Delta tables. Pre-loads the `delta` and `azure` extensions and creates an Azure secret bound to the Azure CLI credential chain, running `az login` itself if there isn't a usable one. |
+| [kql.sh](kql.sh) | `curl` + `jq` wrapper around the Kusto query REST API for any AAD-authenticated KQL endpoint — Fabric Eventhouse / KQL database, Azure Data Explorer, Log Analytics ADX proxy. Reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. |
 | [.env.sample](.env.sample) | Template for the client repo's `.env` — every key the scripts read, with placeholder values. Copied to the **client repo root** (not `scripts/data/`) and filled in. |
 
 ### sql.sh — supported endpoints
@@ -46,29 +46,46 @@ winget install jqlang.jq            # jq, used by kql.sh (curl ships with Window
 
 ## Auth model
 
-All scripts piggyback on your existing Azure CLI session:
+All scripts piggyback on your Azure CLI session. Each needs a token for a *different* audience:
+
+| Script | Token audience | How it gets one |
+|---|---|---|
+| `sql.sh` | `https://database.windows.net/` | passes `--authentication-method ActiveDirectoryAzCli` to sqlcmd, which reads the cached `az` session |
+| `kql.sh` | the cluster URI itself (not a fixed resource string) | `az account get-access-token --resource <cluster-uri>` |
+| `lake.sh` | `https://storage.azure.com/` | DuckDB secret with `PROVIDER credential_chain, CHAIN 'cli'` |
+
+No SAS keys, no service principal secrets, no connection-string passwords.
+
+### All three log you in automatically
+
+Each probes for a token against its own audience before doing any work, and if the cached session can't produce one it starts an interactive login:
 
 ```bash
-az login --tenant <tenant-id-or-domain>
-az account set --subscription <subscription-id>   # optional, scope to the right sub
+az login --allow-no-subscriptions --scope <audience>/.default
 ```
 
-- `sql.sh` passes `--authentication-method ActiveDirectoryAzCli` to sqlcmd, which fetches a SQL-audience token from the cached `az` session.
-- `lake.sh` creates a DuckDB secret with `PROVIDER credential_chain, CHAIN 'cli'`, so DuckDB's azure extension picks up the same `az` token for OneLake (storage-audience) requests.
-- `kql.sh` runs `az account get-access-token --resource <cluster-uri>` — the token audience is the cluster host itself, not a fixed resource string.
+So there is nothing to run first — invoke the script and answer the browser prompt if it appears. This matters most when an AI coding tool drives the script: without the probe, the failure surfaces as sqlcmd's generic login error, a bare `ERROR: Please run 'az login'`, or (for `lake.sh`) an opaque DuckDB failure part-way through a query — none of which a tool can act on.
 
-No SAS keys, no service principal secrets, no connection-string passwords. Token lifetime follows your `az` session — re-run `az login` if a script suddenly returns 401.
+`lake.sh` is the case the probe helps most: DuckDB fetches the token internally through the credential chain, so there is no exit code to react to and a bad session fails deep inside the query rather than up front.
 
-**Auth gotcha**: DuckDB requests a token for the `https://storage.azure.com` audience. Under Conditional Access, a plain `az login` may give you an ARM-scoped session that silently fails to mint a storage token (you'll see `'az account get-access-token' command failed: ERROR: Please run 'az login'` even though `az account show` works). Fix with a scoped login:
+Two details of that command are deliberate:
+
+- **`--allow-no-subscriptions`** — a Fabric-only tenant has no Azure subscription attached, and without the flag `az login` fails with *No subscriptions found* before minting anything. The tokens these scripts need are tenant-scoped, so nothing is lost by allowing it.
+- **`--scope <audience>/.default`** — the audience is requested explicitly rather than relying on a default ARM-scoped login, which is what makes the Conditional Access case below work rather than 401.
+
+The probe asks for the specific audience rather than checking `az account show`, because under Conditional Access a session can be valid while still unable to mint a token for the target — `az account show` succeeds and the query still fails.
+
+Knobs, both optional:
+
+- `AZURE_TENANT_ID` — passed as `--tenant`. Read from the environment first, then from `.env`. Only needed for an account that is a guest in more than one tenant, where an unqualified login lands in the home tenant and mints a token the endpoint rejects. (`lake.sh` reads nothing else from `.env` and runs fine without one.)
+- `SKIP_AZ_LOGIN=1` in the environment — suppresses the login prompt and lets the underlying tool fail with its own error. For CI, or a headless box where an interactive login would hang.
+
+On a headless box, log in once by hand instead and the probe will pass from then on — one login per audience you use:
 
 ```bash
-az login --scope https://storage.azure.com/.default
-```
-
-`kql.sh` has the same failure mode with a different scope — its token audience is the cluster URI, so if it returns 401 under Conditional Access:
-
-```bash
-az login --scope "https://<cluster>.<region>.kusto.fabric.microsoft.com/.default"
+az login --use-device-code --allow-no-subscriptions --scope https://database.windows.net/.default
+az login --use-device-code --allow-no-subscriptions --scope https://storage.azure.com/.default
+az login --use-device-code --allow-no-subscriptions --scope "https://<cluster>.<region>.kusto.fabric.microsoft.com/.default"
 ```
 
 ## Deployment into a client repo
@@ -108,7 +125,7 @@ az login --scope "https://<cluster>.<region>.kusto.fabric.microsoft.com/.default
 
    The Query URI is on the KQL database's detail page in the Fabric portal (or the ADX cluster overview blade). `KUSTO_DATABASE` takes the database name; the item GUID also works.
 
-7. `lake.sh` does not read `.env` — workspace, lakehouse, schema, and table go inline in each ABFSS URL.
+7. `lake.sh` takes no connection details from `.env` — workspace, lakehouse, schema, and table go inline in each ABFSS URL. The only key it reads is the optional `AZURE_TENANT_ID`, and it runs fine with no `.env` at all.
 
 8. **Optional: tell the repo's AI tools the wrappers exist.** Drop the [snippet below](#ai-tool-instruction-snippet) into whichever instruction file your AI tool of choice reads. The same markdown content works for all of them.
 
@@ -185,10 +202,10 @@ Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`,
 ```markdown
 ## Local data wrappers (scripts/data/)
 
-- `scripts/data/sql.sh` — sqlcmd wrapper for the repo's T-SQL endpoints (Fabric SQL DB / Fabric Warehouse / Azure SQL DB); reads `SQL_ENDPOINT_<NAME>` entries from `.env`, authenticates via `az login`. Usage: `scripts/data/sql.sh -Q "SELECT ..."` or `-i file.sql` or stdin; `-e <name>` picks an endpoint, `-d <database>` targets another item on the same host, `-l` lists endpoints.
+- `scripts/data/sql.sh` — sqlcmd wrapper for the repo's T-SQL endpoints (Fabric SQL DB / Fabric Warehouse / Azure SQL DB); reads `SQL_ENDPOINT_<NAME>` entries from `.env`. Usage: `scripts/data/sql.sh -Q "SELECT ..."` or `-i file.sql` or stdin; `-e <name>` picks an endpoint, `-d <database>` targets another item on the same host, `-l` lists endpoints.
 - `scripts/data/lake.sh` — DuckDB wrapper for OneLake Delta tables; pre-loads delta/azure extensions and an `az`-CLI-chain secret. Usage: `scripts/data/lake.sh -c "SELECT ... FROM delta_scan('abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<lakehouse>.Lakehouse/Tables/<schema>/<table>')"` or no-args for REPL.
-- `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`, authenticates via `az login`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too.
-- All require an active `az login` session; no SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
+- `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too.
+- All three handle auth themselves — they check for a usable Azure CLI token and start an interactive `az login` if there isn't one, so just run them; don't run `az login` first or treat a login prompt as an error. No SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
 - Prefer these wrappers for ad-hoc data exploration when the user asks to inspect, sample, count, or query repo data.
 ```
 
