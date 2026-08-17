@@ -2,7 +2,8 @@
 # Wrapper around modern `sqlcmd` for any AAD-authenticated T-SQL endpoint —
 # Fabric Warehouse, Fabric Lakehouse SQL analytics endpoint, Fabric SQL
 # Database, Azure SQL Database / Managed Instance, Synapse dedicated pool.
-# Authenticates with the Azure CLI token (`az login`).
+# Authenticates with the Azure CLI token, and runs `az login` for you if the
+# cached session cannot mint one (see "Azure CLI login preflight" below).
 #
 # ONE SCRIPT, NOT ONE PER ENDPOINT TYPE. A Fabric workspace exposes a single
 # SQL host, and the "database" is just the item display name — the same host
@@ -27,6 +28,9 @@
 #   SQL_ENDPOINT_FABRIC=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
 #   SQL_ENDPOINT_AZURE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;
 #   SQL_ENDPOINT_DEFAULT=FABRIC
+#
+# Optional .env key:
+#   AZURE_TENANT_ID=<tenant-id-or-domain>   # passed to `az login` when set
 #
 # Usage:
 #   scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"   # default endpoint
@@ -70,6 +74,69 @@ env_value() {
 list_endpoints() {
     grep -oE '^SQL_ENDPOINT_[A-Za-z0-9_]+' "$ENV_FILE" 2>/dev/null \
         | sed 's/^SQL_ENDPOINT_//' | grep -v '^DEFAULT$' || true
+}
+
+# --- Azure CLI login preflight ------------------------------------------------
+# sqlcmd's ActiveDirectoryAzCli method shells out to the cached `az` session and
+# reports a missing or expired one as a generic login failure, which is a dead
+# end when the script is driven by a tool rather than typed by hand. Probing for
+# the token first turns that into an actual login prompt.
+#
+# --allow-no-subscriptions: a Fabric-only tenant has no Azure subscription
+# attached, and without the flag `az login` fails with "No subscriptions found"
+# before minting anything. The token wanted here is tenant-scoped, so the flag
+# costs nothing and keeps subscription-less tenants working.
+#
+# Escape hatches: SKIP_AZ_LOGIN=1 suppresses the prompt (CI, or when the
+# underlying tool's own error is what you want to see). On a headless box with
+# no browser, log in once by hand:
+#   az login --use-device-code --allow-no-subscriptions --scope <resource>/.default
+ensure_az_login() {
+    local resource="$1"
+    local scope="${resource%/}/.default"
+
+    if ! command -v az >/dev/null 2>&1; then
+        echo "error: az not found on PATH" >&2
+        echo "hint: winget install Microsoft.AzureCLI" >&2
+        exit 1
+    fi
+
+    # Probe the exact audience rather than calling `az account show`: under
+    # Conditional Access the session can be valid while still unable to mint a
+    # token for this resource, and only the former would be caught.
+    if az account get-access-token --resource "$resource" -o none 2>/dev/null; then
+        return 0
+    fi
+
+    if [[ "${SKIP_AZ_LOGIN:-0}" == "1" ]]; then
+        echo "warning: no Azure CLI token for $resource, and SKIP_AZ_LOGIN=1" >&2
+        return 0
+    fi
+
+    # Environment wins over .env so a one-off tenant switch needs no file edit.
+    local tenant="${AZURE_TENANT_ID:-}"
+    if [[ -z "$tenant" ]]; then
+        tenant=$(env_value AZURE_TENANT_ID)
+    fi
+    local tenant_args=()
+    # Only needed for an account that is a guest in several tenants, where an
+    # unqualified login lands in the home tenant and mints a rejected token.
+    if [[ -n "$tenant" ]]; then
+        tenant_args=(--tenant "$tenant")
+    fi
+
+    echo "note: no Azure CLI token for $resource — starting interactive login" >&2
+    # -o none plus the stderr redirect keep az's subscription dump out of this
+    # script's stdout, which callers pipe into other tools.
+    if ! az login --allow-no-subscriptions --scope "$scope" \
+            ${tenant_args+"${tenant_args[@]}"} -o none >&2; then
+        echo "error: az login failed" >&2
+        exit 1
+    fi
+    if ! az account get-access-token --resource "$resource" -o none 2>/dev/null; then
+        echo "error: az login succeeded but still no token for $resource" >&2
+        exit 1
+    fi
 }
 
 ENDPOINT=""
@@ -167,10 +234,28 @@ if [[ -z "$DATABASE" ]]; then
 fi
 
 # Don't fight an explicit choice: only supply the default auth method if the
-# caller has not passed one through.
+# caller has not passed one through. The chosen method is tracked separately
+# because it decides whether the az preflight below applies at all — passing
+# --authentication-method SqlPassword should not trigger an Azure login.
 AUTH=(--authentication-method ActiveDirectoryAzCli)
+AUTH_METHOD="ActiveDirectoryAzCli"
+_want_method=0
 for arg in ${ARGS+"${ARGS[@]}"}; do
-    [[ "$arg" == --authentication-method* ]] && AUTH=()
+    if [[ "$_want_method" -eq 1 ]]; then
+        AUTH_METHOD="$arg"
+        _want_method=0
+        continue
+    fi
+    case "$arg" in
+        --authentication-method=*) AUTH=(); AUTH_METHOD="${arg#*=}" ;;
+        --authentication-method)   AUTH=(); _want_method=1 ;;
+    esac
 done
+
+# Audience for TDS endpoints — Fabric Warehouse / SQL DB and Azure SQL all take
+# the same one. See the token-audience table in the fabric-auth notes.
+if [[ "${AUTH_METHOD,,}" == "activedirectoryazcli" ]]; then
+    ensure_az_login "https://database.windows.net/"
+fi
 
 exec sqlcmd -S "$SERVER" -d "$DATABASE" ${AUTH+"${AUTH[@]}"} ${ARGS+"${ARGS[@]}"}
