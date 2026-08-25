@@ -17,7 +17,7 @@
 #
 # Usage:
 #   scripts/data/report-png.sh -l                          # list reports in the workspace
-#   scripts/data/report-png.sh -r "FDI_RP_Operation"       # export all pages to PNG
+#   scripts/data/report-png.sh -r "<report-name>"       # export all pages to PNG
 #   scripts/data/report-png.sh -r <report-guid>            # GUID works too
 #   scripts/data/report-png.sh -r "Sales" -p "Overview"    # single page (display name or ReportSection name)
 #   scripts/data/report-png.sh -r "Sales" -f PDF           # PDF fallback when PNG is tenant-blocked
