@@ -4,3 +4,8 @@
 
 # Shell-based git hooks must stay LF or bash on macOS/Linux rejects the shebang.
 .githooks/*   text eol=lf
+
+# The local-cli wrappers are bash scripts copied into client repos - CRLF breaks
+# them at run time ("\r: command not found"), and editor EOL conversion otherwise
+# shows up as whole-file whitespace churn in diffs.
+local-cli/*.sh  text eol=lf
