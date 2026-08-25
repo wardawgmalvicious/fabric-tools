@@ -111,9 +111,8 @@ az login --use-device-code --allow-no-subscriptions --scope "https://analysis.wi
 4. For `sql.sh`, define one `SQL_ENDPOINT_<NAME>` entry per endpoint (name them whatever you like):
 
    ```env
-   SQL_ENDPOINT_FABRIC=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
-   SQL_ENDPOINT_AZURE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;Encrypt=True;
-   SQL_ENDPOINT_DEFAULT=FABRIC
+   SQL_ENDPOINT_WAREHOUSE=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+   SQL_ENDPOINT_DATABASE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;Encrypt=True;
    ```
 
    Both value shapes are accepted because the portal hands out both: Fabric Warehouse / Lakehouse SQL endpoint gives a bare host with no database — the database is the **item display name**, which the portal never puts in the string, so append it yourself as `<host>/<database>` (or pass `-d` at run time). Fabric SQL Database and Azure SQL give a full ADO.NET string; only `Server=` and `Initial Catalog=`/`Database=` are parsed, the rest is ignored. `SQL_ENDPOINT_DEFAULT` names the endpoint used when `-e` isn't passed; with exactly one endpoint defined it's optional. `sql.sh -l` lists what's configured.
