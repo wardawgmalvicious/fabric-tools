@@ -214,13 +214,13 @@ scripts/data/report-png.sh -l
 
 # Export every page of a report to PNG (files land in report-pages/<Report>/,
 # named by page display name; paths printed to stdout)
-scripts/data/report-png.sh -r "FDI_RP_Operation"
+scripts/data/report-png.sh -r "Sales"
 
 # Single page, by display name or internal ReportSection name
-scripts/data/report-png.sh -r "FDI_RP_Operation" -p "Overview"
+scripts/data/report-png.sh -r "Sales" -p "Overview"
 
 # PDF fallback when the PNG tenant setting is off
-scripts/data/report-png.sh -r "FDI_RP_Operation" -f PDF
+scripts/data/report-png.sh -r "Sales" -f PDF
 
 # Custom output dir / other workspace
 scripts/data/report-png.sh -r "Sales" -o out/ -w <workspace-guid>
