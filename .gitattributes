@@ -9,3 +9,6 @@
 # them at run time ("\r: command not found"), and editor EOL conversion otherwise
 # shows up as whole-file whitespace churn in diffs.
 local-cli/*.sh  text eol=lf
+
+# This file too - Windows tooling converting it to CRLF is diff churn.
+.gitattributes  text eol=lf
