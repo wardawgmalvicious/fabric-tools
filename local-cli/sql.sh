@@ -25,16 +25,16 @@
 # Azure SQL give a full ADO.NET string. Normalising by hand is exactly the step
 # that gets skipped, so the script does it.
 #
-#   SQL_ENDPOINT_FABRIC=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
-#   SQL_ENDPOINT_AZURE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;
-#   SQL_ENDPOINT_DEFAULT=FABRIC
+#   SQL_ENDPOINT_WAREHOUSE=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+#   SQL_ENDPOINT_DATABASE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;
+#   SQL_ENDPOINT_DEFAULT=WAREHOUSE
 #
 # Optional .env key:
 #   AZURE_TENANT_ID=<tenant-id-or-domain>   # passed to `az login` when set
 #
 # Usage:
 #   scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"   # default endpoint
-#   scripts/data/sql.sh -e azure -Q "SELECT 1"                      # named endpoint
+#   scripts/data/sql.sh -e database -Q "SELECT 1"                   # named endpoint
 #   scripts/data/sql.sh -d <LakehouseName> -Q "SELECT 1"            # same host, other item
 #   scripts/data/sql.sh -i path/to/script.sql
 #   echo "SELECT 1" | scripts/data/sql.sh

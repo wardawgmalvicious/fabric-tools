@@ -157,7 +157,7 @@ az login --use-device-code --allow-no-subscriptions --scope "https://analysis.wi
 scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"
 
 # Pick a named endpoint from .env
-scripts/data/sql.sh -e azure -Q "SELECT 1"
+scripts/data/sql.sh -e database -Q "SELECT 1"
 
 # Same host, different item (e.g. the Lakehouse SQL endpoint on a Fabric host)
 scripts/data/sql.sh -d <LakehouseName> -Q "SELECT 1"
