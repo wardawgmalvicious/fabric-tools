@@ -112,6 +112,7 @@ az login --use-device-code --allow-no-subscriptions --scope "https://analysis.wi
 
    ```env
    SQL_ENDPOINT_WAREHOUSE=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+   SQL_ENDPOINT_LAKEHOUSE=<xxx>.datawarehouse.fabric.microsoft.com/<LakehouseName>
    SQL_ENDPOINT_DATABASE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;Encrypt=True;
    ```
 
