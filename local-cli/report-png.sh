@@ -15,6 +15,15 @@
 #                       app.powerbi.com/groups/<GUID>/...
 #   AZURE_TENANT_ID     optional — passed to `az login` when set
 #
+# Multi-environment repos prefix the workspace key with an environment name
+# (alnum, no underscore) and pick the environment per run with -E, the FAB_ENV
+# variable, or ENV_DEFAULT in .env — <ENV>_PBI_WORKSPACE_ID is checked first,
+# bare PBI_WORKSPACE_ID as fallback:
+#
+#   SANDBOX_PBI_WORKSPACE_ID=<workspace-guid>
+#   PROD_PBI_WORKSPACE_ID=<workspace-guid>
+#   ENV_DEFAULT=SANDBOX
+#
 # Usage:
 #   scripts/data/report-png.sh -l                          # list reports in the workspace
 #   scripts/data/report-png.sh -r "<report-name>"          # export all pages to PNG
@@ -23,6 +32,7 @@
 #   scripts/data/report-png.sh -r "Sales" -f PDF           # PDF fallback when PNG is tenant-blocked
 #   scripts/data/report-png.sh -r "Sales" -o out/          # output dir (default report-pages/<Report>/)
 #   scripts/data/report-png.sh -r "Sales" -w <ws-guid>     # override .env workspace
+#   scripts/data/report-png.sh -E prod -r "Sales"          # pick environment
 #
 # Output: one PNG per report page (multi-page exports arrive as a zip and are
 # extracted), file paths printed to stdout — ready for an AI tool to read the
@@ -52,6 +62,16 @@ ENV_FILE="$REPO_ROOT/.env"
 env_value() {
     if [[ ! -f "$ENV_FILE" ]]; then return 0; fi
     { grep -E "^$1=" "$ENV_FILE" || true; } | head -n 1 | cut -d '=' -f 2- | tr -d '\r'
+}
+
+# Resolve a key through the active environment first (<ENV>_<KEY>), then bare.
+cfg_value() {
+    if [[ -n "${ENVNAME:-}" ]]; then
+        local v
+        v=$(env_value "${ENVNAME}_$1")
+        if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+    fi
+    env_value "$1"
 }
 
 # --- Azure CLI login preflight ------------------------------------------------
@@ -127,6 +147,7 @@ PAGE=""
 FORMAT="PNG"
 OUTDIR=""
 LIST=0
+ENVNAME=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -135,16 +156,23 @@ while [[ $# -gt 0 ]]; do
         -p) PAGE="$2"; shift 2 ;;
         -f) FORMAT="$2"; shift 2 ;;
         -o) OUTDIR="$2"; shift 2 ;;
+        -E) ENVNAME="$2"; shift 2 ;;
         -l) LIST=1; shift ;;
         # Print the header block: line 2 through the first blank line. A fixed
         # line range silently drifts out of date every time the header is edited.
         -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}"; exit 0 ;;
-        *) echo "error: unknown argument '$1' (expected -w, -r, -p, -f, -o, -l)" >&2; exit 1 ;;
+        *) echo "error: unknown argument '$1' (expected -w, -r, -p, -f, -o, -E, -l)" >&2; exit 1 ;;
     esac
 done
 
+# Active environment: -E flag, then FAB_ENV, then ENV_DEFAULT in .env. Optional —
+# with none of the three set, only bare keys are read (single-environment mode).
+if [[ -z "$ENVNAME" ]]; then ENVNAME="${FAB_ENV:-}"; fi
+if [[ -z "$ENVNAME" ]]; then ENVNAME=$(env_value ENV_DEFAULT); fi
+ENVNAME="${ENVNAME^^}"
+
 if [[ -z "$WORKSPACE" ]]; then
-    WORKSPACE=$(env_value PBI_WORKSPACE_ID)
+    WORKSPACE=$(cfg_value PBI_WORKSPACE_ID)
 fi
 if [[ -z "${WORKSPACE:-}" ]]; then
     echo "error: no workspace — set PBI_WORKSPACE_ID in $ENV_FILE or pass -w <guid>" >&2

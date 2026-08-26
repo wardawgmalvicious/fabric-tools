@@ -120,6 +120,20 @@ az login --use-device-code --allow-no-subscriptions --scope "https://analysis.wi
 
 5. **If the client repo already has a legacy `SQL_CONNECTION_STRING`**, it still works — the script falls back to it with a note on stderr suggesting the rename. Rename it to `SQL_ENDPOINT_<NAME>` when you want more than one endpoint.
 
+   **Multi-environment repos** (dev/test/prod workspaces behind deployment pipelines): prefix any connection key with an environment name and pick the environment per run:
+
+   ```env
+   ENV_DEFAULT=DEV
+   DEV_SQL_ENDPOINT_WAREHOUSE=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+   PROD_SQL_ENDPOINT_WAREHOUSE=<yyy>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+   DEV_KUSTO_CLUSTER_URI=https://<cluster-d>.<region>.kusto.fabric.microsoft.com
+   PROD_KUSTO_CLUSTER_URI=https://<cluster-p>.<region>.kusto.fabric.microsoft.com
+   KUSTO_DATABASE=<KqlDatabaseName>
+   DEV_PBI_WORKSPACE_ID=<workspace-guid>
+   ```
+
+   The environment is chosen by `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh`, else the `FAB_ENV` environment variable, else `ENV_DEFAULT` in `.env`; with none of the three set only bare keys are read (single-environment behavior, fully backward compatible). Lookup is `<ENV>_<KEY>` first, bare `<KEY>` as fallback — deployment pipelines keep item *display names* identical across stages, so typically only hosts, cluster URIs, and workspace GUIDs get prefixed while name-valued keys (`KUSTO_DATABASE`, the `/<database>` suffix inside each endpoint value) are written once. Environment names are alphanumeric only (no underscores — the key parse would be ambiguous). Point `ENV_DEFAULT` at the safe environment so reaching prod always takes an explicit `-E prod`. `lake.sh` has no environment flag — its connection details are inline in each ABFSS URL.
+
 6. For `kql.sh`, fill in the cluster URI and database:
 
    ```env
@@ -159,6 +173,9 @@ scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"
 
 # Pick a named endpoint from .env
 scripts/data/sql.sh -e database -Q "SELECT 1"
+
+# Pick an environment (multi-env .env; defaults to ENV_DEFAULT / FAB_ENV)
+scripts/data/sql.sh -E prod -Q "SELECT 1"
 
 # Same host, different item (e.g. the Lakehouse SQL endpoint on a Fabric host)
 scripts/data/sql.sh -d <LakehouseName> -Q "SELECT 1"
@@ -241,6 +258,7 @@ Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`,
 - `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too.
 - `scripts/data/report-png.sh` — renders a published Power BI report to PNG files via the exportToFile REST API (no Power BI Desktop); reads `PBI_WORKSPACE_ID` from `.env`. Usage: `scripts/data/report-png.sh -r "<ReportName>"` exports all pages (file paths on stdout — read the PNGs to review the rendered report); `-p <page>` one page, `-l` lists reports, `-f PDF` if PNG export is tenant-disabled. Use after publishing report edits to visually verify layout, sorting, theming, and non-empty visuals.
 - All of these handle auth themselves — they check for a usable Azure CLI token and start an interactive `az login` if there isn't one, so just run them; don't run `az login` first or treat a login prompt as an error. No SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
+- Multi-environment: `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` picks the environment (`<ENV>_`-prefixed `.env` keys, bare keys as fallback); without it the `ENV_DEFAULT` environment applies. Environments in this repo: `<list-environments>` (default `<default-env>`).
 - Prefer these wrappers for ad-hoc data exploration when the user asks to inspect, sample, count, or query repo data.
 ```
 
