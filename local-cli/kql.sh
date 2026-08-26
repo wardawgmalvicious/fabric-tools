@@ -37,8 +37,9 @@
 #   scripts/data/kql.sh -i path/to/query.kql
 #   echo "<Table> | take 5" | scripts/data/kql.sh
 #
-#   # -E picks the environment:
+#   # -E picks the environment, -d another database on the same cluster:
 #   scripts/data/kql.sh -E prod -q "<Table> | count"
+#   scripts/data/kql.sh -d <OtherKqlDatabase> -q "<Table> | count"
 #
 #   # Management commands (leading dot) go to /v1/rest/mgmt automatically:
 #   scripts/data/kql.sh -q ".show tables"
@@ -153,6 +154,7 @@ ensure_az_login() {
 QUERY=""
 RAW=0
 ENVNAME=""
+DATABASE_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -165,10 +167,11 @@ while [[ $# -gt 0 ]]; do
             QUERY=$(cat "$2"); shift 2 ;;
         -r) RAW=1; shift ;;
         -E) ENVNAME="$2"; shift 2 ;;
+        -d) DATABASE_OVERRIDE="$2"; shift 2 ;;
         # Print the header block: line 2 through the first blank line. A fixed
         # line range silently drifts out of date every time the header is edited.
         -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}"; exit 0 ;;
-        *) echo "error: unknown argument '$1' (expected -q, -i, -r, -E, or stdin)" >&2; exit 1 ;;
+        *) echo "error: unknown argument '$1' (expected -q, -i, -r, -E, -d, or stdin)" >&2; exit 1 ;;
     esac
 done
 
@@ -179,12 +182,14 @@ if [[ -z "$ENVNAME" ]]; then ENVNAME=$(env_value ENV_DEFAULT); fi
 ENVNAME="${ENVNAME^^}"
 
 CLUSTER=$(cfg_value KUSTO_CLUSTER_URI)
-DATABASE=$(cfg_value KUSTO_DATABASE)
+DATABASE="$DATABASE_OVERRIDE"
+[[ -z "$DATABASE" ]] && DATABASE=$(cfg_value KUSTO_DATABASE)
 
 if [[ -z "${CLUSTER:-}" || -z "${DATABASE:-}" ]]; then
     echo "error: KUSTO_CLUSTER_URI and KUSTO_DATABASE must both be set in $ENV_FILE" >&2
     if [[ -n "$ENVNAME" ]]; then
-        echo "       (environment $ENVNAME: <ENV>_<key> is checked first, bare <key> as fallback)" >&2
+        echo "       (environment $ENVNAME: <ENV>_<key> is checked first, bare <key> as fallback;" >&2
+        echo "        -d <database> overrides KUSTO_DATABASE)" >&2
     fi
     exit 1
 fi
