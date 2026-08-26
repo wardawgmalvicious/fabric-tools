@@ -16,6 +16,17 @@
 #                       GUID also works.
 #   AZURE_TENANT_ID     optional — passed to `az login` when set
 #
+# Multi-environment repos prefix the keys with an environment name (alnum, no
+# underscore) and pick the environment per run with -E, the FAB_ENV variable,
+# or ENV_DEFAULT in .env. Lookup is <ENV>_<KEY> first, bare <KEY> as fallback —
+# deployment pipelines keep item names identical across stages, so typically
+# only the cluster URI is prefixed and KUSTO_DATABASE stays bare:
+#
+#   SANDBOX_KUSTO_CLUSTER_URI=https://<cluster-s>.<region>.kusto.fabric.microsoft.com
+#   PROD_KUSTO_CLUSTER_URI=https://<cluster-p>.<region>.kusto.fabric.microsoft.com
+#   KUSTO_DATABASE=<KqlDatabaseName>
+#   ENV_DEFAULT=SANDBOX
+#
 # Auth note: the token audience is the cluster host itself, not a fixed resource
 # string. Under Conditional Access a plain `az login` may not cover it, so the
 # preflight below probes for a token against that exact audience rather than
@@ -25,6 +36,9 @@
 #   scripts/data/kql.sh -q "<Table> | count"
 #   scripts/data/kql.sh -i path/to/query.kql
 #   echo "<Table> | take 5" | scripts/data/kql.sh
+#
+#   # -E picks the environment:
+#   scripts/data/kql.sh -E prod -q "<Table> | count"
 #
 #   # Management commands (leading dot) go to /v1/rest/mgmt automatically:
 #   scripts/data/kql.sh -q ".show tables"
@@ -60,6 +74,18 @@ fi
 # before the explicit check below could print a useful message.
 env_value() {
     { grep -E "^$1=" "$ENV_FILE" || true; } | head -n 1 | cut -d '=' -f 2- | tr -d '\r'
+}
+
+# Resolve a key through the active environment first (<ENV>_<KEY>), then bare.
+# Env-invariant keys (an item name identical in every workspace) are written
+# once, unprefixed, and still resolve when an environment is active.
+cfg_value() {
+    if [[ -n "${ENVNAME:-}" ]]; then
+        local v
+        v=$(env_value "${ENVNAME}_$1")
+        if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+    fi
+    env_value "$1"
 }
 
 # --- Azure CLI login preflight ------------------------------------------------
@@ -124,17 +150,9 @@ ensure_az_login() {
     fi
 }
 
-CLUSTER=$(env_value KUSTO_CLUSTER_URI)
-DATABASE=$(env_value KUSTO_DATABASE)
-
-if [[ -z "${CLUSTER:-}" || -z "${DATABASE:-}" ]]; then
-    echo "error: KUSTO_CLUSTER_URI and KUSTO_DATABASE must both be set in $ENV_FILE" >&2
-    exit 1
-fi
-CLUSTER="${CLUSTER%/}"  # tolerate a trailing slash
-
 QUERY=""
 RAW=0
+ENVNAME=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -146,12 +164,31 @@ while [[ $# -gt 0 ]]; do
             fi
             QUERY=$(cat "$2"); shift 2 ;;
         -r) RAW=1; shift ;;
+        -E) ENVNAME="$2"; shift 2 ;;
         # Print the header block: line 2 through the first blank line. A fixed
         # line range silently drifts out of date every time the header is edited.
         -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}"; exit 0 ;;
-        *) echo "error: unknown argument '$1' (expected -q, -i, -r, or stdin)" >&2; exit 1 ;;
+        *) echo "error: unknown argument '$1' (expected -q, -i, -r, -E, or stdin)" >&2; exit 1 ;;
     esac
 done
+
+# Active environment: -E flag, then FAB_ENV, then ENV_DEFAULT in .env. Optional —
+# with none of the three set, only bare keys are read (single-environment mode).
+if [[ -z "$ENVNAME" ]]; then ENVNAME="${FAB_ENV:-}"; fi
+if [[ -z "$ENVNAME" ]]; then ENVNAME=$(env_value ENV_DEFAULT); fi
+ENVNAME="${ENVNAME^^}"
+
+CLUSTER=$(cfg_value KUSTO_CLUSTER_URI)
+DATABASE=$(cfg_value KUSTO_DATABASE)
+
+if [[ -z "${CLUSTER:-}" || -z "${DATABASE:-}" ]]; then
+    echo "error: KUSTO_CLUSTER_URI and KUSTO_DATABASE must both be set in $ENV_FILE" >&2
+    if [[ -n "$ENVNAME" ]]; then
+        echo "       (environment $ENVNAME: <ENV>_<key> is checked first, bare <key> as fallback)" >&2
+    fi
+    exit 1
+fi
+CLUSTER="${CLUSTER%/}"  # tolerate a trailing slash
 
 # No -q/-i: read the query from stdin, so `echo ... | kql.sh` and heredocs work.
 if [[ -z "$QUERY" ]]; then

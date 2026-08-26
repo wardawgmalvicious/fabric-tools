@@ -30,18 +30,28 @@
 #   SQL_ENDPOINT_DATABASE=Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;
 #   SQL_ENDPOINT_DEFAULT=WAREHOUSE
 #
+# Multi-environment repos prefix any key with an environment name (alnum, no
+# underscore) and pick the environment per run with -E, the FAB_ENV variable,
+# or ENV_DEFAULT in .env. Lookup is <ENV>_<KEY> first, bare <KEY> as fallback,
+# so keys whose value is the same in every environment stay unprefixed:
+#
+#   SANDBOX_SQL_ENDPOINT_WAREHOUSE=<xxx>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+#   PROD_SQL_ENDPOINT_WAREHOUSE=<yyy>.datawarehouse.fabric.microsoft.com/<WarehouseName>
+#   ENV_DEFAULT=SANDBOX                     # environment when -E isn't passed
+#
 # Optional .env key:
 #   AZURE_TENANT_ID=<tenant-id-or-domain>   # passed to `az login` when set
 #
 # Usage:
 #   scripts/data/sql.sh -Q "SELECT TOP 5 * FROM <schema>.<Table>"   # default endpoint
 #   scripts/data/sql.sh -e database -Q "SELECT 1"                   # named endpoint
+#   scripts/data/sql.sh -E prod -Q "SELECT 1"                       # pick environment
 #   scripts/data/sql.sh -d <LakehouseName> -Q "SELECT 1"            # same host, other item
 #   scripts/data/sql.sh -i path/to/script.sql
 #   echo "SELECT 1" | scripts/data/sql.sh
 #   scripts/data/sql.sh -l                                          # list configured endpoints
 #
-# -e/-d/-l are consumed here; every other flag passes straight to sqlcmd. -d
+# -e/-E/-d/-l are consumed here; every other flag passes straight to sqlcmd. -d
 # keeps sqlcmd's own meaning (database), so there is nothing new to remember.
 #
 # Deployment assumption: this script lives at <client-repo>/scripts/data/sql.sh
@@ -72,9 +82,30 @@ env_value() {
     { grep -E "^$1=" "$ENV_FILE" || true; } | head -n 1 | cut -d '=' -f 2- | tr -d '\r'
 }
 
+# Resolve a key through the active environment first (<ENV>_<KEY>), then bare.
+# Env-invariant keys (an item name identical in every workspace) are written
+# once, unprefixed, and still resolve when an environment is active.
+cfg_value() {
+    if [[ -n "${ENVNAME:-}" ]]; then
+        local v
+        v=$(env_value "${ENVNAME}_$1")
+        if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+    fi
+    env_value "$1"
+}
+
 list_endpoints() {
-    grep -oE '^SQL_ENDPOINT_[A-Za-z0-9_]+' "$ENV_FILE" 2>/dev/null \
-        | sed 's/^SQL_ENDPOINT_//' | grep -v '^DEFAULT$' || true
+    # $1 = key prefix: "" for bare entries, "<ENV>_" for one environment's.
+    grep -oE "^${1}SQL_ENDPOINT_[A-Za-z0-9_]+" "$ENV_FILE" 2>/dev/null \
+        | sed "s/^${1}SQL_ENDPOINT_//" | grep -v '^DEFAULT$' || true
+}
+
+# Environment names are the alnum prefixes in front of SQL_ENDPOINT_ keys
+# (SANDBOX_SQL_ENDPOINT_WAREHOUSE → SANDBOX). Underscores are not allowed in
+# an environment name — the parse would be ambiguous.
+list_env_prefixes() {
+    grep -oE '^[A-Za-z0-9]+_SQL_ENDPOINT_[A-Za-z0-9_]+' "$ENV_FILE" 2>/dev/null \
+        | sed -E 's/_SQL_ENDPOINT_.*$//' | sort -u || true
 }
 
 # --- Azure CLI login preflight ------------------------------------------------
@@ -142,36 +173,69 @@ ensure_az_login() {
 
 ENDPOINT=""
 DATABASE_OVERRIDE=""
+ENVNAME=""
+LIST=0
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -e) ENDPOINT="$2"; shift 2 ;;
+        -E) ENVNAME="$2"; shift 2 ;;
         -d) DATABASE_OVERRIDE="$2"; shift 2 ;;
-        -l)
-            DEFAULT_NAME=$(env_value SQL_ENDPOINT_DEFAULT)
-            echo "endpoints configured in $ENV_FILE:"
-            found=0
-            while read -r name; do
-                [[ -z "$name" ]] && continue
-                found=1
-                marker="  "
-                [[ "${name^^}" == "${DEFAULT_NAME^^}" ]] && marker="* "
-                printf '%s%-14s %s\n' "$marker" "$name" "$(env_value "SQL_ENDPOINT_$name")"
-            done < <(list_endpoints)
-            [[ "$found" -eq 0 ]] && echo "  (none — see the header of this script for the format)"
-            exit 0 ;;
+        -l) LIST=1; shift ;;
         *) ARGS+=("$1"); shift ;;
     esac
 done
 
+# Active environment: -E flag, then FAB_ENV, then ENV_DEFAULT in .env. Optional —
+# with none of the three set, only bare keys are read (single-environment mode).
+if [[ -z "$ENVNAME" ]]; then ENVNAME="${FAB_ENV:-}"; fi
+if [[ -z "$ENVNAME" ]]; then ENVNAME=$(env_value ENV_DEFAULT); fi
+ENVNAME="${ENVNAME^^}"
+
+if [[ "$LIST" -eq 1 ]]; then
+    DEFAULT_NAME=$(cfg_value SQL_ENDPOINT_DEFAULT)
+    echo "endpoints configured in $ENV_FILE (active environment: ${ENVNAME:-none}; * = default):"
+    found=0
+    print_group() {
+        local prefix="" label="  (no environment)"
+        if [[ -n "$1" ]]; then prefix="${1}_"; label="  environment $1:"; fi
+        local names
+        names=$(list_endpoints "$prefix")
+        [[ -z "$names" ]] && return 0
+        found=1
+        echo "$label"
+        while read -r name; do
+            [[ -z "$name" ]] && continue
+            marker="    "
+            if [[ "${name^^}" == "${DEFAULT_NAME^^}" ]] \
+                    && { [[ -z "$1" && -z "$ENVNAME" ]] || [[ "$1" == "$ENVNAME" ]]; }; then
+                marker="  * "
+            fi
+            printf '%s%-14s %s\n' "$marker" "$name" "$(env_value "${prefix}SQL_ENDPOINT_$name")"
+        done <<<"$names"
+    }
+    print_group ""
+    while read -r envp; do
+        [[ -z "$envp" ]] && continue
+        print_group "$envp"
+    done < <(list_env_prefixes)
+    [[ "$found" -eq 0 ]] && echo "  (none — see the header of this script for the format)"
+    exit 0
+fi
+
 # Resolve which endpoint entry to use: -e, then SQL_ENDPOINT_DEFAULT, then the
 # only one defined if there is exactly one (the common single-endpoint repo).
+# The auto-pick scopes to the active environment so a multi-env .env with one
+# endpoint per environment still needs no -e.
 if [[ -z "$ENDPOINT" ]]; then
-    ENDPOINT=$(env_value SQL_ENDPOINT_DEFAULT)
+    ENDPOINT=$(cfg_value SQL_ENDPOINT_DEFAULT)
 fi
 if [[ -z "$ENDPOINT" ]]; then
-    mapfile -t _names < <(list_endpoints)
+    mapfile -t _names < <(list_endpoints "${ENVNAME:+${ENVNAME}_}")
+    if [[ ${#_names[@]} -eq 0 && -n "$ENVNAME" ]]; then
+        mapfile -t _names < <(list_endpoints "")
+    fi
     if [[ ${#_names[@]} -eq 1 ]]; then
         ENDPOINT="${_names[0]}"
     fi
@@ -179,8 +243,8 @@ fi
 
 CONN=""
 if [[ -n "$ENDPOINT" ]]; then
-    CONN=$(env_value "SQL_ENDPOINT_${ENDPOINT^^}")
-    [[ -z "$CONN" ]] && CONN=$(env_value "SQL_ENDPOINT_${ENDPOINT}")
+    CONN=$(cfg_value "SQL_ENDPOINT_${ENDPOINT^^}")
+    [[ -z "$CONN" ]] && CONN=$(cfg_value "SQL_ENDPOINT_${ENDPOINT}")
 fi
 
 # Legacy single-slot variable. Kept working so an existing .env is not a hard
@@ -196,7 +260,11 @@ fi
 if [[ -z "$CONN" ]]; then
     echo "error: no endpoint configured in $ENV_FILE" >&2
     if [[ -n "$ENDPOINT" ]]; then
-        echo "       looked for SQL_ENDPOINT_${ENDPOINT^^}" >&2
+        if [[ -n "$ENVNAME" ]]; then
+            echo "       looked for ${ENVNAME}_SQL_ENDPOINT_${ENDPOINT^^}, then SQL_ENDPOINT_${ENDPOINT^^}" >&2
+        else
+            echo "       looked for SQL_ENDPOINT_${ENDPOINT^^}" >&2
+        fi
     fi
     echo "       expected SQL_ENDPOINT_<NAME>=<host>[/<database>] or an ADO.NET string" >&2
     echo "       run with -l to list what is defined" >&2
