@@ -1,6 +1,26 @@
-# Notebooks are JSON - pin to LF so the metadata-scrubber hook is idempotent
-# regardless of core.autocrlf on the local clone.
-*.ipynb       text eol=lf
+# --- Standard base (machine-config/configs/gitattributes) ---
+
+# Normalize all text files to LF in the repo. Files already committed with
+# CRLF are left alone until an explicit `git add --renormalize .`.
+* text=auto
+
+# Windows-native scripts: pin CRLF in the working tree. cmd.exe mis-parses
+# LF-only batch files (goto/label resolution), and CRLF is the safe default
+# for scripts that legacy PowerShell hosts or double-click execution touch.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# POSIX shell scripts: pin LF. A bash script that picks up CRLF fails with
+# cryptic "\r: command not found" errors.
+*.sh text eol=lf
+
+# Jupyter notebooks: pin LF. They are JSON written by tooling that emits LF,
+# so a pinned ending keeps hooks and diffs stable regardless of the clone's
+# platform or editor EOL conversion.
+*.ipynb text eol=lf
+
+# --- Repo-specific rules ---
 
 # Shell-based git hooks must stay LF or bash on macOS/Linux rejects the shebang.
 .githooks/*   text eol=lf
@@ -10,6 +30,3 @@
 # shows up as whole-file whitespace churn in diffs. The README and .env.sample
 # ride along so the same conversion can't churn them either.
 local-cli/*     text eol=lf
-
-# This file too - Windows tooling converting it to CRLF is diff churn.
-.gitattributes  text eol=lf
