@@ -9,22 +9,48 @@
 # /v1/rest/query endpoint directly with curl and formats the response with jq.
 # Both are required.
 #
+# NAMED DATABASE ENTRIES, LIKE sql.sh. One Eventhouse exposes ONE query URI, and
+# every KQL database under it shares that URI — so a second database is not a
+# second endpoint, it is another name against the same host. That is the shape
+# sql.sh already solves with SQL_ENDPOINT_<NAME>, so the same mechanism is used
+# here rather than a second one: name the entries in .env, pick one per run with
+# -e, list them with -l. fabric-tools ships the mechanism; the client repo picks
+# the names (OPERATION, LOGGING, whatever fits), so nothing project-specific is
+# baked in and the script still works out of the box on a single database.
+#
 # .env keys:
-#   KUSTO_CLUSTER_URI   https://<cluster>.<region>.kusto.fabric.microsoft.com
-#                       (Fabric portal: KQL database → Query URI)
-#   KUSTO_DATABASE      KQL database name, e.g. <KqlDatabaseName>. The item
-#                       GUID also works.
-#   AZURE_TENANT_ID     optional — passed to `az login` when set
+#   KUSTO_CLUSTER_URI       https://<cluster>.<region>.kusto.fabric.microsoft.com
+#                           (Fabric portal: KQL database → Query URI)
+#   KUSTO_DATABASE_<NAME>   one entry per database, named whatever you like.
+#                           Value is the KQL database display name; the item
+#                           GUID also works.
+#   KUSTO_DATABASE_DEFAULT  which entry runs when -e is omitted. Optional with
+#                           exactly one entry defined.
+#   KUSTO_DATABASE          the original single-slot key. Still read, and still
+#                           preferred over an auto-picked sole named entry, so
+#                           an existing .env keeps behaving exactly as it did.
+#   AZURE_TENANT_ID         optional — passed to `az login` when set
+#
+#   KUSTO_CLUSTER_URI=https://<cluster>.<region>.kusto.fabric.microsoft.com
+#   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
+#   KUSTO_DATABASE_LOGGING=<KqlDatabaseName>
+#   KUSTO_DATABASE_DEFAULT=OPERATION
 #
 # Multi-environment repos prefix the keys with an environment name (alnum, no
 # underscore) and pick the environment per run with -E, the FAB_ENV variable,
 # or ENV_DEFAULT in .env. Lookup is <ENV>_<KEY> first, bare <KEY> as fallback —
-# deployment pipelines keep item names identical across stages, so typically
-# only the cluster URI is prefixed and KUSTO_DATABASE stays bare:
+# deployment pipelines keep item display names identical across stages, so a
+# name-valued entry is written once, bare, while the cluster URI (which moves
+# with the stage) is prefixed. Prefer display names over item GUIDs for exactly
+# that reason: a GUID is stage-specific, so it forces one prefixed line per
+# environment, and a stale one queries the previous target silently where a
+# stale name fails loudly.
 #
 #   SANDBOX_KUSTO_CLUSTER_URI=https://<cluster-s>.<region>.kusto.fabric.microsoft.com
 #   PROD_KUSTO_CLUSTER_URI=https://<cluster-p>.<region>.kusto.fabric.microsoft.com
-#   KUSTO_DATABASE=<KqlDatabaseName>
+#   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
+#   KUSTO_DATABASE_LOGGING=<KqlDatabaseName>
+#   KUSTO_DATABASE_DEFAULT=OPERATION
 #   ENV_DEFAULT=SANDBOX
 #
 # Auth note: the token audience is the cluster host itself, not a fixed resource
@@ -37,8 +63,13 @@
 #   scripts/data/kql.sh -i path/to/query.kql
 #   echo "<Table> | take 5" | scripts/data/kql.sh
 #
-#   # -E picks the environment, -d another database on the same cluster:
+#   # -e picks a named database entry, -E the environment:
+#   scripts/data/kql.sh -e logging -q "<Table> | count"
 #   scripts/data/kql.sh -E prod -q "<Table> | count"
+#   scripts/data/kql.sh -l                      # list configured databases
+#
+#   # -d passes a database name/GUID straight through, bypassing .env entirely —
+#   # unchanged from before, for a one-off database that has no entry:
 #   scripts/data/kql.sh -d <OtherKqlDatabase> -q "<Table> | count"
 #
 #   # Management commands (leading dot) go to /v1/rest/mgmt automatically:
@@ -87,6 +118,25 @@ cfg_value() {
         if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
     fi
     env_value "$1"
+}
+
+# Named database entries, mirroring sql.sh's list_endpoints. The bare
+# KUSTO_DATABASE key has no trailing _<NAME> so it never appears here — it is
+# the unnamed single slot, resolved separately below.
+list_databases() {
+    # $1 = key prefix: "" for bare entries, "<ENV>_" for one environment's.
+    grep -oE "^${1}KUSTO_DATABASE_[A-Za-z0-9_]+" "$ENV_FILE" 2>/dev/null \
+        | sed "s/^${1}KUSTO_DATABASE_//" | grep -v '^DEFAULT$' || true
+}
+
+# Environment names are the alnum prefixes in front of any KUSTO_ key
+# (SANDBOX_KUSTO_CLUSTER_URI → SANDBOX). Derived from every KUSTO_ key, not just
+# the database ones, so an environment that only overrides the cluster URI is
+# still listed. Underscores are not allowed in an environment name — the key
+# parse would be ambiguous.
+list_env_prefixes() {
+    grep -oE '^[A-Za-z0-9]+_KUSTO_' "$ENV_FILE" 2>/dev/null \
+        | sed -E 's/_KUSTO_$//' | sort -u || true
 }
 
 # --- Azure CLI login preflight ------------------------------------------------
@@ -155,6 +205,8 @@ QUERY=""
 RAW=0
 ENVNAME=""
 DATABASE_OVERRIDE=""
+ENTRY=""
+LIST=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -167,11 +219,13 @@ while [[ $# -gt 0 ]]; do
             QUERY=$(cat "$2"); shift 2 ;;
         -r) RAW=1; shift ;;
         -E) ENVNAME="$2"; shift 2 ;;
+        -e) ENTRY="$2"; shift 2 ;;
         -d) DATABASE_OVERRIDE="$2"; shift 2 ;;
+        -l) LIST=1; shift ;;
         # Print the header block: line 2 through the first blank line. A fixed
         # line range silently drifts out of date every time the header is edited.
         -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}"; exit 0 ;;
-        *) echo "error: unknown argument '$1' (expected -q, -i, -r, -E, -d, or stdin)" >&2; exit 1 ;;
+        *) echo "error: unknown argument '$1' (expected -q, -i, -r, -E, -e, -d, -l, or stdin)" >&2; exit 1 ;;
     esac
 done
 
@@ -182,15 +236,116 @@ if [[ -z "$ENVNAME" ]]; then ENVNAME=$(env_value ENV_DEFAULT); fi
 ENVNAME="${ENVNAME^^}"
 
 CLUSTER=$(cfg_value KUSTO_CLUSTER_URI)
-DATABASE="$DATABASE_OVERRIDE"
-[[ -z "$DATABASE" ]] && DATABASE=$(cfg_value KUSTO_DATABASE)
+
+# Database resolution, in precedence order. Nothing here is fatal — -l needs to
+# list what is configured even when none of it resolves, so the empty case is
+# reported after the listing block below.
+DATABASE=""
+DB_SOURCE=""
+DB_ENTRY=""
+if [[ -n "$DATABASE_OVERRIDE" ]]; then
+    # -d keeps its original meaning: the value goes to Kusto verbatim with no
+    # .env lookup, so existing `-d <guid>` calls behave exactly as before.
+    DATABASE="$DATABASE_OVERRIDE"
+    DB_SOURCE="-d override"
+elif [[ -n "$ENTRY" ]]; then
+    DB_ENTRY="${ENTRY^^}"
+    DATABASE=$(cfg_value "KUSTO_DATABASE_${DB_ENTRY}")
+    if [[ -z "$DATABASE" ]]; then
+        echo "error: no database entry '$ENTRY' in $ENV_FILE" >&2
+        if [[ -n "$ENVNAME" ]]; then
+            echo "       looked for ${ENVNAME}_KUSTO_DATABASE_${DB_ENTRY}, then KUSTO_DATABASE_${DB_ENTRY}" >&2
+        else
+            echo "       looked for KUSTO_DATABASE_${DB_ENTRY}" >&2
+        fi
+        echo "       run with -l to list what is defined" >&2
+        exit 1
+    fi
+    DB_SOURCE="entry ${DB_ENTRY}"
+else
+    _default=$(cfg_value KUSTO_DATABASE_DEFAULT)
+    if [[ -n "$_default" ]]; then
+        DB_ENTRY="${_default^^}"
+        DATABASE=$(cfg_value "KUSTO_DATABASE_${DB_ENTRY}")
+        if [[ -z "$DATABASE" ]]; then
+            echo "error: KUSTO_DATABASE_DEFAULT names '$_default', but no KUSTO_DATABASE_${DB_ENTRY} is set" >&2
+            echo "       run with -l to list what is defined" >&2
+            exit 1
+        fi
+        DB_SOURCE="entry ${DB_ENTRY} (KUSTO_DATABASE_DEFAULT)"
+    fi
+    # The original single-slot key, checked BEFORE auto-picking a sole named
+    # entry. That order is load-bearing: an existing .env with KUSTO_DATABASE
+    # plus one named extra (a logging database, say) must keep resolving to
+    # KUSTO_DATABASE rather than silently switching to the extra.
+    if [[ -z "$DATABASE" ]]; then
+        DATABASE=$(cfg_value KUSTO_DATABASE)
+        [[ -n "$DATABASE" ]] && DB_SOURCE="KUSTO_DATABASE (unnamed slot)"
+    fi
+    # Sole named entry, scoped to the active environment first, so a multi-env
+    # .env with one database per environment needs no -e either.
+    if [[ -z "$DATABASE" ]]; then
+        mapfile -t _names < <(list_databases "${ENVNAME:+${ENVNAME}_}")
+        if [[ ${#_names[@]} -eq 0 && -n "$ENVNAME" ]]; then
+            mapfile -t _names < <(list_databases "")
+        fi
+        if [[ ${#_names[@]} -eq 1 ]]; then
+            DB_ENTRY="${_names[0]}"
+            DATABASE=$(cfg_value "KUSTO_DATABASE_${DB_ENTRY}")
+            DB_SOURCE="entry ${DB_ENTRY} (only one defined)"
+        fi
+    fi
+fi
+
+if [[ "$LIST" -eq 1 ]]; then
+    echo "KQL databases configured in $ENV_FILE (active environment: ${ENVNAME:-none}; * = used without -e):"
+    found=0
+    print_group() {
+        local prefix="" label="  (no environment)"
+        if [[ -n "$1" ]]; then prefix="${1}_"; label="  environment $1:"; fi
+        local names unnamed
+        names=$(list_databases "$prefix")
+        unnamed=$(env_value "${prefix}KUSTO_DATABASE")
+        [[ -z "$names" && -z "$unnamed" ]] && return 0
+        found=1
+        echo "$label"
+        # The * marks the row a no-flag run actually resolves to, matched on
+        # VALUE as well as name. Matching on the group alone would be wrong for
+        # the common layout where only the cluster URI is environment-prefixed
+        # and the database entries are bare: the resolved entry then lives in
+        # the "(no environment)" group while an environment is active.
+        local marker value
+        if [[ -n "$unnamed" ]]; then
+            marker="    "
+            [[ "$DB_SOURCE" == "KUSTO_DATABASE"* && "$unnamed" == "$DATABASE" ]] && marker="  * "
+            printf '%s%-14s %s\n' "$marker" "(unnamed)" "$unnamed"
+        fi
+        while read -r name; do
+            [[ -z "$name" ]] && continue
+            value=$(env_value "${prefix}KUSTO_DATABASE_$name")
+            marker="    "
+            [[ "$name" == "$DB_ENTRY" && "$value" == "$DATABASE" ]] && marker="  * "
+            printf '%s%-14s %s\n' "$marker" "$name" "$value"
+        done <<<"$names"
+    }
+    print_group ""
+    while read -r envp; do
+        [[ -z "$envp" ]] && continue
+        print_group "$envp"
+    done < <(list_env_prefixes)
+    [[ "$found" -eq 0 ]] && echo "  (none — see the header of this script for the format)"
+    exit 0
+fi
 
 if [[ -z "${CLUSTER:-}" || -z "${DATABASE:-}" ]]; then
-    echo "error: KUSTO_CLUSTER_URI and KUSTO_DATABASE must both be set in $ENV_FILE" >&2
+    echo "error: KUSTO_CLUSTER_URI and a KQL database must both be resolvable from $ENV_FILE" >&2
+    echo "       expected KUSTO_CLUSTER_URI plus one of:" >&2
+    echo "         KUSTO_DATABASE_<NAME>=<KqlDatabaseName>   (pick with -e <name>)" >&2
+    echo "         KUSTO_DATABASE=<KqlDatabaseName>          (the unnamed single slot)" >&2
     if [[ -n "$ENVNAME" ]]; then
-        echo "       (environment $ENVNAME: <ENV>_<key> is checked first, bare <key> as fallback;" >&2
-        echo "        -d <database> overrides KUSTO_DATABASE)" >&2
+        echo "       (environment $ENVNAME: <ENV>_<key> is checked first, bare <key> as fallback)" >&2
     fi
+    echo "       -d <database> bypasses .env entirely; -l lists what is defined" >&2
     exit 1
 fi
 CLUSTER="${CLUSTER%/}"  # tolerate a trailing slash

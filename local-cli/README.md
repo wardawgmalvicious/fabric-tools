@@ -10,7 +10,7 @@ These are templates. Copy them into a client repo at `scripts/data/` and use the
 |---|---|
 | [sql.sh](sql.sh) | `sqlcmd` wrapper for any AAD-authenticated T-SQL endpoint (see *Supported endpoints* below). Reads named `SQL_ENDPOINT_<NAME>` entries from `.env` (bare host or ADO.NET connection string), then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-e` picks an endpoint, `-d` overrides the database, `-l` lists what's configured. |
 | [lake.sh](lake.sh) | DuckDB wrapper for OneLake Delta tables. Pre-loads the `delta` and `azure` extensions and creates an Azure secret bound to the Azure CLI credential chain, running `az login` itself if there isn't a usable one. |
-| [kql.sh](kql.sh) | `curl` + `jq` wrapper around the Kusto query REST API for any AAD-authenticated KQL endpoint — Fabric Eventhouse / KQL database, Azure Data Explorer, Log Analytics ADX proxy. Reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. |
+| [kql.sh](kql.sh) | `curl` + `jq` wrapper around the Kusto query REST API for any AAD-authenticated KQL endpoint — Fabric Eventhouse / KQL database, Azure Data Explorer, Log Analytics ADX proxy. Reads `KUSTO_CLUSTER_URI` and named `KUSTO_DATABASE_<NAME>` entries from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-e` picks a database entry, `-d` passes a database through raw, `-l` lists what's configured. |
 | [dax.sh](dax.sh) | `curl` + `jq` wrapper around the Power BI `executeQueries` REST API — runs DAX against a **published** semantic model and prints the result as a table. Reads `PBI_WORKSPACE_ID` and `PBI_SEMANTIC_MODEL_ID`/`_NAME` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-q`/`-i`/stdin take the query, `-m` picks the model by display name or GUID, `-s` runs a canned model-metadata query, `-u` impersonates a user to test RLS, `-l` lists the workspace's models. |
 | [report-png.sh](report-png.sh) | `curl` + `jq` wrapper around the Power BI `exportToFile` REST API — renders a **published** report's pages to PNG (or PDF) files server-side, no Power BI Desktop involved. Reads `PBI_WORKSPACE_ID` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-r` picks the report by display name or GUID, `-p` a single page, `-f PDF` the format fallback, `-l` lists the workspace's reports. Built as the visual-verification step of an AI-driven report-authoring loop: publish PBIR edits → export PNGs → the agent reviews the rendered pages. |
 | [.env.sample](.env.sample) | Template for the client repo's `.env` — every key the scripts read, with placeholder values. Copied to the **client repo root** (not `scripts/data/`) and filled in. |
@@ -148,21 +148,28 @@ az login --use-device-code --allow-no-subscriptions --scope "https://analysis.wi
    PROD_SQL_ENDPOINT_WAREHOUSE=<yyy>.datawarehouse.fabric.microsoft.com/<WarehouseName>
    DEV_KUSTO_CLUSTER_URI=https://<cluster-d>.<region>.kusto.fabric.microsoft.com
    PROD_KUSTO_CLUSTER_URI=https://<cluster-p>.<region>.kusto.fabric.microsoft.com
-   KUSTO_DATABASE=<KqlDatabaseName>
+   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
+   KUSTO_DATABASE_DEFAULT=OPERATION
    DEV_PBI_WORKSPACE_ID=<workspace-guid>
    PBI_SEMANTIC_MODEL_NAME=<SemanticModelName>
    ```
 
-   The environment is chosen by `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh`, else the `FAB_ENV` environment variable, else `ENV_DEFAULT` in `.env`; with none of the three set only bare keys are read (single-environment behavior, fully backward compatible). Lookup is `<ENV>_<KEY>` first, bare `<KEY>` as fallback — deployment pipelines keep item *display names* identical across stages, so typically only hosts, cluster URIs, and workspace GUIDs get prefixed while name-valued keys (`KUSTO_DATABASE`, the `/<database>` suffix inside each endpoint value) are written once. Environment names are alphanumeric only (no underscores — the key parse would be ambiguous). Point `ENV_DEFAULT` at the safe environment so reaching prod always takes an explicit `-E prod`. `lake.sh` has no environment flag — its connection details are inline in each ABFSS URL. `kql.sh` additionally accepts `-d <database>` to hit another database on the same cluster (e.g. a logging database beside the operational one).
+   The environment is chosen by `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh`, else the `FAB_ENV` environment variable, else `ENV_DEFAULT` in `.env`; with none of the three set only bare keys are read (single-environment behavior, fully backward compatible). Lookup is `<ENV>_<KEY>` first, bare `<KEY>` as fallback — deployment pipelines keep item *display names* identical across stages, so typically only hosts, cluster URIs, and workspace GUIDs get prefixed while name-valued keys (`KUSTO_DATABASE_<NAME>` entries, the `/<database>` suffix inside each endpoint value) are written once. Environment names are alphanumeric only (no underscores — the key parse would be ambiguous). Point `ENV_DEFAULT` at the safe environment so reaching prod always takes an explicit `-E prod`. `lake.sh` has no environment flag — its connection details are inline in each ABFSS URL. `kql.sh` additionally accepts `-e <name>` to pick another database on the same cluster (a logging database beside the operational one), and `-d <database>` to pass one through without an entry.
 
-6. For `kql.sh`, fill in the cluster URI and database:
+6. For `kql.sh`, fill in the cluster URI and one entry per KQL database:
 
    ```env
    KUSTO_CLUSTER_URI=https://<cluster>.<region>.kusto.fabric.microsoft.com
-   KUSTO_DATABASE=<KqlDatabaseName>
+   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
+   KUSTO_DATABASE_LOGGING=<KqlDatabaseName>
+   KUSTO_DATABASE_DEFAULT=OPERATION
    ```
 
-   The Query URI is on the KQL database's detail page in the Fabric portal (or the ADX cluster overview blade). `KUSTO_DATABASE` takes the database name; the item GUID also works.
+   The Query URI is on the KQL database's detail page in the Fabric portal (or the ADX cluster overview blade). Entry values take the database display name; the item GUID also works.
+
+   **One Eventhouse exposes one query URI, shared by every KQL database under it** — so a second database isn't a second endpoint, it's another name against the same host. That's the shape `SQL_ENDPOINT_<NAME>` already solves, so `kql.sh` uses the same mechanism rather than a second one: name the entries, pick one per run with `-e`, list them with `-l`. Names are yours to choose (`OPERATION`/`LOGGING` above are illustrative, exactly like `WAREHOUSE`/`LAKEHOUSE`); `KUSTO_DATABASE_DEFAULT` picks the one used when `-e` is omitted, and is optional with exactly one entry defined.
+
+   The original single-slot `KUSTO_DATABASE` is still read, so an existing `.env` needs no edit. It also still *wins* over an auto-picked sole named entry — deliberately, so a repo that adds one named extra beside an existing `KUSTO_DATABASE` keeps resolving to `KUSTO_DATABASE` instead of silently switching. `-d <database>` is unchanged too: it bypasses `.env` entirely and passes the value straight through, for a one-off database with no entry.
 
 7. `lake.sh` takes no connection details from `.env` — workspace, lakehouse, schema, and table go inline in each ABFSS URL. The only key it reads is the optional `AZURE_TENANT_ID`, and it runs fine with no `.env` at all.
 
@@ -248,6 +255,13 @@ scripts/data/kql.sh -i path/to/query.kql
 # Pipe from stdin
 echo "<Table> | take 5" | scripts/data/kql.sh
 
+# Pick a named database entry from .env (* marks the default in -l)
+scripts/data/kql.sh -e logging -q "<Table> | count"
+scripts/data/kql.sh -l
+
+# -d passes a database name/GUID straight through, no .env entry needed
+scripts/data/kql.sh -d <OtherKqlDatabase> -q "<Table> | count"
+
 # Management commands (leading dot) route to /v1/rest/mgmt automatically
 scripts/data/kql.sh -q ".show tables"
 
@@ -323,7 +337,7 @@ Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`,
 
 - `scripts/data/sql.sh` — sqlcmd wrapper for the repo's T-SQL endpoints (Fabric SQL DB / Fabric Warehouse / Azure SQL DB); reads `SQL_ENDPOINT_<NAME>` entries from `.env`. Usage: `scripts/data/sql.sh -Q "SELECT ..."` or `-i file.sql` or stdin; `-e <name>` picks an endpoint, `-d <database>` targets another item on the same host, `-l` lists endpoints.
 - `scripts/data/lake.sh` — DuckDB wrapper for OneLake Delta tables; pre-loads delta/azure extensions and an `az`-CLI-chain secret. Usage: `scripts/data/lake.sh -c "SELECT ... FROM delta_scan('abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<lakehouse>.Lakehouse/Tables/<schema>/<table>')"` or no-args for REPL.
-- `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and `KUSTO_DATABASE` from `.env`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too.
+- `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and named `KUSTO_DATABASE_<NAME>` entries from `.env`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too. `-e <name>` picks another database on the same cluster (one Eventhouse query URI serves all of them), `-l` lists them, `-d <database>` passes one through without an entry. Databases in this repo: `<list-kql-databases>`.
 - `scripts/data/dax.sh` — runs DAX against a published semantic model via the Power BI executeQueries REST API; reads `PBI_WORKSPACE_ID` and `PBI_SEMANTIC_MODEL_ID`/`_NAME` from `.env`. Usage: `scripts/data/dax.sh -q "EVALUATE ..."` or `-i file.dax` or stdin; `-m <name-or-guid>` picks the model, `-l` lists models, `-u <upn>` impersonates a user to test RLS, `-r` emits raw JSON. `-s tables|columns|measures|relationships` lists model metadata — run `-s columns` or `-s measures` before writing a measure rather than guessing at names, data types, or existing logic. This reads the model *after* relationships, calculated columns, and measure logic have been applied, so prefer it over `sql.sh`/`lake.sh` whenever the question is about what a report will actually show (a measure's value, a total, blank behavior) rather than what's in the source. One query per call, one result table per query, 100k-row cap.
 - `scripts/data/report-png.sh` — renders a published Power BI report to PNG files via the exportToFile REST API (no Power BI Desktop); reads `PBI_WORKSPACE_ID` from `.env`. Usage: `scripts/data/report-png.sh -r "<ReportName>"` exports all pages (file paths on stdout — read the PNGs to review the rendered report); `-p <page>` one page, `-l` lists reports, `-f PDF` if PNG export is tenant-disabled. Use after publishing report edits to visually verify layout, sorting, theming, and non-empty visuals.
 - All of these handle auth themselves — they check for a usable Azure CLI token and start an interactive `az login` if there isn't one, so just run them; don't run `az login` first or treat a login prompt as an error. No SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
