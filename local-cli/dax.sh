@@ -23,8 +23,13 @@
 #   PBI_WORKSPACE_ID      workspace (group) GUID — from the workspace URL:
 #                         app.powerbi.com/groups/<GUID>/...  (shared with
 #                         report-png.sh; define it once)
-#   PBI_SEMANTIC_MODEL    optional — default model, display name or GUID.
-#                         -m overrides it; with neither set, -l lists them.
+#   PBI_SEMANTIC_MODEL_ID     optional — default model as an item GUID.
+#   PBI_SEMANTIC_MODEL_NAME   optional — default model as a display name.
+#                         Set either; _ID wins when both are. -m overrides both,
+#                         and accepts either shape. With none set, -l lists them.
+#                         The suffix is a rule, not a label: a GUID is
+#                         stage-specific and gets an <ENV>_ prefix, a display
+#                         name survives promotion and is written once, bare.
 #   AZURE_TENANT_ID       optional — passed to `az login` when set
 #
 # Multi-environment repos prefix the keys with an environment name (alnum, no
@@ -35,7 +40,7 @@
 #
 #   SANDBOX_PBI_WORKSPACE_ID=<workspace-guid>
 #   PROD_PBI_WORKSPACE_ID=<workspace-guid>
-#   PBI_SEMANTIC_MODEL=<SemanticModelName>
+#   PBI_SEMANTIC_MODEL_NAME=<SemanticModelName>   # bare: same name in every stage
 #   ENV_DEFAULT=SANDBOX
 #
 # Usage:
@@ -369,13 +374,41 @@ if [[ -z "$QUERY" ]]; then
     QUERY=$(cat)
 fi
 
+# Two typed keys rather than one polymorphic one, because the suffix carries an
+# operational rule and not just documentation: a GUID is stage-specific and must
+# be <ENV>_-prefixed, while a display name survives dev/test/prod promotion
+# unchanged and is therefore written once, bare. A single key named for neither
+# leaves the next reader no way to tell which rule applies, and the failure is
+# silent — a sandbox GUID sitting in a bare key answers a `-E prod` run too.
+# _ID wins when both are set: it needs no lookup and cannot hit a duplicate name.
+MODEL_SOURCE=""
 if [[ -z "$MODEL" ]]; then
-    MODEL=$(cfg_value PBI_SEMANTIC_MODEL)
+    MODEL=$(cfg_value PBI_SEMANTIC_MODEL_ID)
+    [[ -n "$MODEL" ]] && MODEL_SOURCE="PBI_SEMANTIC_MODEL_ID"
+fi
+if [[ -z "$MODEL" ]]; then
+    MODEL=$(cfg_value PBI_SEMANTIC_MODEL_NAME)
+    [[ -n "$MODEL" ]] && MODEL_SOURCE="PBI_SEMANTIC_MODEL_NAME"
 fi
 if [[ -z "${MODEL:-}" ]]; then
-    echo "error: no semantic model — set PBI_SEMANTIC_MODEL in $ENV_FILE or pass -m <name-or-guid>" >&2
+    echo "error: no semantic model — pass -m <name-or-guid>, or set one of these in $ENV_FILE:" >&2
+    echo "         PBI_SEMANTIC_MODEL_ID=<guid>            # stage-specific: prefix it per environment" >&2
+    echo "         PBI_SEMANTIC_MODEL_NAME=<DisplayName>   # stage-invariant: write it once, bare" >&2
     echo "hint: run with -l to list the models in workspace $WORKSPACE" >&2
     exit 1
+fi
+
+# A value in the wrong key still works — the resolution below sniffs the shape
+# rather than trusting the suffix — but it means the environment-prefix rule
+# above is being applied to the wrong thing, which is worth saying out loud.
+if [[ "$MODEL_SOURCE" == "PBI_SEMANTIC_MODEL_ID" && ! "$MODEL" =~ $GUID_RE ]]; then
+    echo "warning: $MODEL_SOURCE holds '$MODEL', which is not a GUID — resolving it as a" >&2
+    echo "         display name. Move it to PBI_SEMANTIC_MODEL_NAME (and drop any" >&2
+    echo "         environment prefix: display names are identical across stages)." >&2
+elif [[ "$MODEL_SOURCE" == "PBI_SEMANTIC_MODEL_NAME" && "$MODEL" =~ $GUID_RE ]]; then
+    echo "warning: $MODEL_SOURCE holds a GUID. GUIDs are stage-specific, so a bare key" >&2
+    echo "         answers every environment — a ${ENVNAME:-prod} run would query this same" >&2
+    echo "         model. Move it to <ENV>_PBI_SEMANTIC_MODEL_ID." >&2
 fi
 
 # Resolve a model display name to its GUID; a GUID passes through untouched.
