@@ -106,7 +106,9 @@ foreach ($p in $Paths) {
   if ($nb.Contains('nbformat')) { $scrubbed['nbformat'] = $nb['nbformat'] }
   if ($nb.Contains('nbformat_minor')) { $scrubbed['nbformat_minor'] = $nb['nbformat_minor'] }
 
-  $rewritten = ($scrubbed | ConvertTo-Json -Depth 100) + "`n"
+  # ConvertTo-Json emits CRLF on Windows, so comparing it against an LF file
+  # reports a change on every run and writes CRLF back. Normalize to LF first.
+  $rewritten = (($scrubbed | ConvertTo-Json -Depth 100) -replace "\r\n", "`n") + "`n"
 
   if ($rewritten -ne $original) {
     [System.IO.File]::WriteAllText(
