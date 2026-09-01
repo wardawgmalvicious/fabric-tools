@@ -1,0 +1,11 @@
+{
+  // Tooling this repo's own files need. Deliberately minimal: nothing here
+  // executes against a live Fabric endpoint, so the mssql / Kusto / TMDL /
+  // Power Query stack is intentionally absent.
+  "recommendations": [
+    // local-cli/*.sh and .githooks/pre-commit are bash.
+    "timonwong.shellcheck",
+    // .githooks/scrub-fabric-notebook.ps1 requires pwsh 7+.
+    "ms-vscode.powershell"
+  ]
+}
