@@ -23,7 +23,6 @@ Desktop.ini
 .DS_Store
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
