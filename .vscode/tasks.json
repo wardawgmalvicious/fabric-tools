@@ -1,0 +1,30 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // CLAUDE.md marks this REQUIRED before committing notebooks, and it is
+      // per-clone config that no amount of committed files can set for you.
+      "label": "Enable notebook scrub hook",
+      "type": "process",
+      "command": "git",
+      "args": ["config", "core.hooksPath", ".githooks"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      // Same invocation the pre-commit hook uses, for checking a notebook
+      // before staging it. Idempotent: prints "clean: no changes needed"
+      // when there is nothing to strip.
+      "label": "Scrub current notebook",
+      "type": "process",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/.githooks/scrub-fabric-notebook.ps1",
+        "${file}"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}
