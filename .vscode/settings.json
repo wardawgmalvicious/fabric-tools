@@ -1,0 +1,8 @@
+{
+  // The pre-commit hook is bash but extensionless, so it would otherwise be
+  // treated as plaintext and skipped by shellcheck. Scoped to the exact path
+  // so the sibling .ps1 keeps its own language.
+  "files.associations": {
+    "**/.githooks/pre-commit": "shellscript"
+  }
+}
