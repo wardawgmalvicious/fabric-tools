@@ -1,0 +1,52 @@
+{
+    "mcpServers": {
+        "github-mcp": {
+            "type": "http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {
+                "Authorization": "Bearer ${GITHUB_PAT_PERSONAL}"
+            }
+        },
+        "powerbi-modeling-mcp": {
+            "type": "stdio",
+            "command": "cmd",
+            "args": [
+                "/c",
+                "npx",
+                "-y",
+                "@microsoft/powerbi-modeling-mcp@latest",
+                "--start"
+            ]
+        },
+        "microsoft-fabric-mcp": {
+            "type": "stdio",
+            "command": "cmd",
+            "args": [
+                "/c",
+                "npx",
+                "-y",
+                "@microsoft/fabric-mcp@latest",
+                "server",
+                "start",
+                "--mode",
+                "all"
+            ]
+        },
+        "fabric-rti-mcp": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "microsoft-fabric-rti-mcp"
+            ]
+        },
+        "fabric-data-factory-mcp": {
+            "type": "stdio",
+            "command": "dnx",
+            "args": [
+                "Microsoft.DataFactory.MCP",
+                "--prerelease",
+                "--yes"
+            ]
+        }
+    }
+}
