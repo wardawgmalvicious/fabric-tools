@@ -1,6 +1,6 @@
 # fabric-tools
 
-A collection of Microsoft Fabric notebooks for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
+A collection of Microsoft Fabric notebooks, local CLI wrappers, and configuration guides for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
 
 Most community Fabric content assumes interactive user authentication and manual portal clicks. This toolkit takes the opposite approach: everything runs via service principal, everything is parameterized, and everything is designed to slot into automated pipelines.
 
@@ -14,15 +14,19 @@ fabric-tools/
 │   ├── nb_sp_identity.ipynb
 │   ├── nb_sp_mirror.ipynb
 │   └── README.md
-├── maintenance/        # Lakehouse optimization, Spark configuration, table settings
+├── maintenance/        # Lakehouse optimization, table settings, Spark configuration, bulk table drops
 │   ├── nb_lh_configure.ipynb
+│   ├── nb_lh_drop_tables.ipynb
 │   ├── nb_lh_optimize.ipynb
 │   ├── nb_spark_config.ipynb
 │   └── README.md
 ├── integration/        # Reference patterns for ingesting from external systems
 │   ├── nb_salesforce_ingest.ipynb
+│   ├── nb_syteline_ingest.ipynb
 │   └── README.md
-├── utilities/          # GUID extraction, Variable Library management
+├── utilities/          # GUID extraction, Variable Library management, workspace migration, tenant audits
+│   ├── nb_connection_audit.ipynb
+│   ├── nb_deployment_pipeline_audit.ipynb
 │   ├── nb_extract_guids.ipynb
 │   ├── nb_migrate_items.ipynb
 │   └── README.md
@@ -30,10 +34,16 @@ fabric-tools/
 │   ├── configure-ai-semantic-model.md
 │   ├── configure-data-agent.md
 │   └── README.md
-├── local-cli/          # Local-workstation CLI wrappers (sqlcmd, DuckDB) for ad-hoc Fabric data exploration
+├── local-cli/          # Local-workstation CLI wrappers (sqlcmd, DuckDB, curl + jq over REST) for ad-hoc Fabric data exploration
+│   ├── .env.sample
+│   ├── dax.sh
+│   ├── kql.sh
 │   ├── lake.sh
+│   ├── report-png.sh
 │   ├── sql.sh
 │   └── README.md
+├── docs/               # Repo-level documentation and generated assets
+│   └── social/         # GitHub social preview card - HTML source plus the rendered PNG
 ├── .githooks/          # Opt-in pre-commit hook that strips Fabric metadata from notebooks
 └── README.md
 ```
@@ -43,13 +53,14 @@ fabric-tools/
 - Microsoft Fabric workspace with capacity assigned
 - Azure Key Vault with service principal credentials stored as secrets
 - Service principal with appropriate Fabric API permissions
-- Fabric notebooks runtime (PySpark)
+- Fabric notebooks runtime (PySpark; a few notebooks are pure Python)
+- For `local-cli/` only: Azure CLI (`az login`) on the workstation, plus `sqlcmd`, `duckdb`, `curl`, and `jq`. These wrappers authenticate as the signed-in user, not a service principal.
 
 ## Design Principles
 
 - **SP-first**: All admin operations authenticate via service principal through Azure Key Vault - no interactive login dependencies.
 - **Variable Library-driven**: GUIDs and environment-specific values are managed through Fabric Variable Libraries, not hardcoded in notebooks.
-- **Idempotent where possible**: Maintenance operations (OPTIMIZE, VACUUM) are safe to re-run. Creation operations validate before acting.
+- **Idempotent where possible**: Maintenance operations (OPTIMIZE, VACUUM) are safe to re-run. Creation operations validate before acting. Destructive operations default to a dry run.
 - **LRO-aware**: All long-running Fabric REST API operations are polled to completion with timeout handling.
 
 ## Getting Started
@@ -57,6 +68,7 @@ fabric-tools/
 1. Clone or import these notebooks into your Fabric workspace.
 2. Configure `nb_sp_common` with your Key Vault name and secret names.
 3. Start with `admin/nb_sp_create_item.ipynb` to provision workspace items, or `maintenance/nb_lh_optimize.ipynb` to run table maintenance.
+4. For querying Fabric from your own machine, copy `local-cli/` into a client repo at `scripts/data/` and its `.env.sample` to that repo's root as `.env`.
 
 See each folder's README for detailed usage.
 
