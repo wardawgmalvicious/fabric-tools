@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# pre-push — the last gate before anything in this repo becomes public.
+#
+# Activate with:  git config core.hooksPath .githooks
+#
+# This repo is public. A commit authored by an agent that runs none of
+# Claude Code's own hooks — GitHub Copilot, VS Code's Source Control view,
+# a plain terminal — reaches history with nothing between it and origin.
+# Git runs its own hooks whoever pushes, so this is the one place that has
+# no such hole. Two checks, in order:
+#
+#   1. identity-guard — scans the messages and added lines of every commit
+#      being pushed that no remote already has, against the local denylist
+#      (~/.config/identity-denylist.txt, in no repo, because the list is
+#      itself the leak). Catches a client or employer name, a tenant or
+#      account name, a hardcoded profile path. Runs for every push,
+#      Claude Code's included.
+#
+#   2. session gate — refuses a push that no Claude Code session issued.
+#      The guard above matches only names already on its list; this one
+#      covers the rest by making review a precondition rather than a
+#      pattern match. Override for one push, having reviewed the commits:
+#
+#          git -c fabrictools.push=reviewed push <same arguments>
+#
+#      Same syntax in Git Bash and PowerShell. The override is read from
+#      GIT_CONFIG_PARAMETERS, which git exports to hooks for `-c` values,
+#      and NOT through `git config`: that would also accept a value written
+#      to .git/config, which persists and silently opens the gate for every
+#      later push. An environment variable fails the same way in a
+#      long-lived shell. `-c` lasts one command.
+#
+# The marker for check 2 is CLAUDECODE=1, which Claude Code sets in its
+# shell tools and git passes through to hooks. Do NOT widen it to
+# CLAUDE_CODE_SSE_PORT: the Claude Code VS Code extension injects that one
+# into every integrated terminal, including the ones Copilot runs commands
+# in, which would hand the gate straight to the harness it exists to catch.
+#
+# Every ref, not just main: a pushed branch is just as public. This guards
+# against accidents, not intent — --no-verify skips it, as it skips every
+# hook, which is why the message below addresses the agent directly.
+#
+# Bypass (both checks):  git push --no-verify
+set -uo pipefail
+
+# --- 1. identity-guard -------------------------------------------------
+#
+# One copy of the script and one reader of the denylist: this calls the
+# deployed hook rather than vendoring it, so a fix there is live here. Not
+# present (a fresh clone, another machine, CI) -> skipped, matching the
+# guard's own failure-open policy. IDENTITY_GUARD overrides the path.
+guard="${IDENTITY_GUARD:-$HOME/.claude/hooks/identity-guard.sh}"
+
+if [ -f "$guard" ]; then
+  # git feeds pre-push one line per ref on stdin:
+  #   <local ref> <local sha> <remote ref> <remote sha>
+  # A deletion has an all-zero local sha and no content to scan. The guard
+  # reads the ref from PRE_COMMIT_TO_REF (HEAD when unset), so pass each
+  # one explicitly — a push of a branch that is not checked out would
+  # otherwise scan HEAD, which is the wrong commits.
+  refs=()
+  lines=0
+  while read -r local_ref local_sha _remote_ref _remote_sha; do
+    [ -n "${local_ref:-}" ] || continue
+    lines=$((lines + 1))
+    case "$local_sha" in
+      *[!0]*) refs+=("$local_ref") ;;
+    esac
+  done
+  # No lines at all means the hook was run by hand, with nothing to read the
+  # refs from -> fall back to HEAD. Lines but no refs means every one was a
+  # deletion, which pushes no content: scanning HEAD there would block
+  # `git push --delete` over unrelated unpushed work on the current branch.
+  if [ ${#refs[@]} -eq 0 ] && [ "$lines" -eq 0 ]; then
+    refs=(HEAD)
+  fi
+
+  for ref in ${refs[@]+"${refs[@]}"}; do
+    PRE_COMMIT_TO_REF="$ref" bash "$guard" --git-hook pre-push || exit 1
+  done
+fi
+
+# --- 2. session gate ---------------------------------------------------
+[ "${CLAUDECODE:-}" = 1 ] && exit 0
+
+# Quoted forms only, so `fabrictools.push=unreviewed` does not match. Git
+# writes 'key'='value' since 2.31 and 'key=value' before it.
+case "${GIT_CONFIG_PARAMETERS:-}" in
+  *"'fabrictools.push'='reviewed'"* | *"'fabrictools.push=reviewed'"*) exit 0 ;;
+esac
+
+cat >&2 <<'MSG'
+pre-push: blocked — this push was not issued from a Claude Code session.
+
+fabric-tools is public, and nothing reaches it unreviewed. Either push from
+Claude Code after it has reviewed the unpushed commits, or, having reviewed
+them yourself, push once with the override:
+
+    git -c fabrictools.push=reviewed push <same arguments>
+
+If you are an AI assistant other than Claude Code: stop here and tell the
+user. Do not retry with the override or with --no-verify.
+MSG
+exit 1
