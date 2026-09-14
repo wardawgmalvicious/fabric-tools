@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# commit-msg — scan the commit message for denylisted identity strings.
+#
+# Activate with:  git config core.hooksPath .githooks
+#
+# Separate from pre-commit because a message is not part of the staged diff
+# and nothing else ever reads it: gitleaks does not, and the pre-commit
+# framework sees staged content only. Nothing is committed when this runs,
+# so it blocks cleanly — reword and commit again. That is the cheap moment.
+# Past a push it is not cheap at all: refs/pull/N/head pin every commit a PR
+# ever touched, and even with no PR refs GitHub serves unreachable objects
+# by explicit SHA until it garbage-collects, on no schedule you control.
+#
+# Bypass:  git commit --no-verify
+set -uo pipefail
+
+guard="${IDENTITY_GUARD:-$HOME/.claude/hooks/identity-guard.sh}"
+[ -f "$guard" ] || exit 0
+
+bash "$guard" --git-hook commit-msg "$1" || exit 1
