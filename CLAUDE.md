@@ -10,20 +10,35 @@ The guiding philosophy is **SP-first, parameterized, CI/CD-ready**: everything a
 
 ## Commands
 
-There is no build/lint/test. The only repo-level workflow is the notebook-metadata scrubber:
+There is no build/lint/test. The repo-level workflows are the notebook-metadata scrubber and the hooks that gate what leaves this clone:
 
 ```bash
-# Activate the pre-commit hook once per clone (REQUIRED before committing notebooks)
+# Activate all three hooks once per clone (REQUIRED before committing notebooks)
 git config core.hooksPath .githooks
 
-# Manually scrub a notebook (what the hook runs per staged .ipynb)
+# Manually scrub a notebook (what pre-commit runs per staged .ipynb)
 pwsh -File .githooks/scrub-fabric-notebook.ps1 path/to/notebook.ipynb
 
-# Bypass the hook if needed
+# Bypass the hooks if needed
 git commit --no-verify
 ```
 
-The hook requires PowerShell 7+ (`pwsh`) on PATH. On this Windows machine, prefer the **PowerShell tool** for shell work — the Bash tool's `bash.exe` is blocked (`EPERM`).
+The scrubber requires PowerShell 7+ (`pwsh`) on PATH. On this Windows machine, prefer the **PowerShell tool** for shell work.
+
+## The push gate
+
+This repo is public and [.githooks/pre-push](.githooks/pre-push) is the last thing between a commit and that. Two checks, both documented at length in the script header:
+
+1. **identity-guard** — runs at `pre-commit` (staged additions, after the notebook scrub), `commit-msg` (the message, which nothing else reads and which cannot be fixed forward once pushed) and `pre-push` (messages and added lines of every commit no remote has). It calls the deployed `~/.claude/hooks/identity-guard.sh` rather than vendoring a copy, so there is one reader of the denylist at `~/.config/identity-denylist.txt`. Absent script or absent list → skipped, not failed.
+2. **session gate** — refuses any push not issued from a Claude Code session (`CLAUDECODE=1`). The guard above matches only names already on its list; this covers the rest by making review a precondition. Nothing another harness wrote goes public unreviewed.
+
+**When a push is blocked by the session gate, do not reach for the override or `--no-verify` on your own** — the override exists for a human who has reviewed the commits:
+
+```bash
+git -c fabrictools.push=reviewed push <same arguments>
+```
+
+Review the unpushed commits first (`git log -p @{u}..`), and if they are clean, push normally from the session — `CLAUDECODE=1` is already set there, so the gate passes without an override.
 
 ## The notebook-metadata invariant (most important rule)
 

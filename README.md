@@ -44,7 +44,7 @@ fabric-tools/
 │   └── README.md
 ├── docs/               # Repo-level documentation and generated assets
 │   └── social/         # GitHub social preview card - HTML source plus the rendered PNG
-├── .githooks/          # Opt-in pre-commit hook that strips Fabric metadata from notebooks
+├── .githooks/          # Opt-in git hooks - strip Fabric metadata from notebooks, gate what reaches a public remote
 └── README.md
 ```
 
@@ -74,15 +74,27 @@ See each folder's README for detailed usage.
 
 ## Contributing
 
-Notebooks downloaded from Fabric carry workspace-bound metadata - default lakehouse GUIDs, `spark_compute.compute_id`, `a365ComputeOptions`, and session settings - that should not be committed. A pre-commit hook in [.githooks/](.githooks/) strips this metadata automatically (and resets cell `outputs` / `execution_count`) on every commit.
-
-Activate it once per clone:
+Three hooks live in [.githooks/](.githooks/). Activate them once per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-The hook requires PowerShell 7+ (`pwsh`) on PATH. Bypass with `git commit --no-verify` if needed.
+| Hook | What it does |
+| --- | --- |
+| `pre-commit` | Strips Fabric-injected metadata from staged notebooks (default lakehouse GUIDs, `spark_compute.compute_id`, `a365ComputeOptions`, session settings), resets cell `outputs` / `execution_count`, re-stages - then scans the staged additions for denylisted identity strings. Requires PowerShell 7+ (`pwsh`) on PATH when notebooks are staged. |
+| `commit-msg` | Scans the commit message for the same strings. Nothing is committed yet, so this blocks cleanly - reword and commit again. |
+| `pre-push` | Scans the messages and added lines of every commit no remote already has, then refuses any push not issued from a Claude Code session. |
+
+The identity scan is the local denylist at `~/.config/identity-denylist.txt` (override with `IDENTITY_DENYLIST`), read by `~/.claude/hooks/identity-guard.sh` (override with `IDENTITY_GUARD`). It catches a client or employer name, a tenant or account name, a hardcoded profile path. The list lives outside every repo because the list is itself the thing that must not be committed; no list, or no guard script, means the scan is skipped rather than failing - so a fresh clone or CI still works.
+
+The push gate exists because this repo is public and an agent that runs none of Claude Code's own hooks - GitHub Copilot, VS Code's Source Control view, a plain terminal - otherwise reaches `origin` with nothing in between. Git runs its own hooks whoever pushes. Having reviewed the commits yourself, push once with:
+
+```bash
+git -c fabrictools.push=reviewed push <same arguments>
+```
+
+Same syntax in Git Bash and PowerShell, and it lasts exactly one command - unlike a `git config` value or an environment variable, which would silently open the gate for every later push. `--no-verify` skips all three, as it skips every hook; these guard against accidents, not intent.
 
 ## License
 
