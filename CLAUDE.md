@@ -25,6 +25,14 @@ git commit --no-verify
 
 The scrubber requires PowerShell 7+ (`pwsh`) on PATH. On this Windows machine, prefer the **PowerShell tool** for shell work.
 
+## Branching
+
+A single self-contained commit goes straight to `main`. That is what every commit here has done (91 of them as of 2026-09-14, no feature branch ever), and for one notebook, one guide, or one doc it stays correct — a branch buys no isolation and costs a merge. **Branch when the change spans more than one commit.** Name it per `~/.claude/CLAUDE.md` § "Branch naming", which is also where the general trigger lives; this section agrees with it and sharpens one half.
+
+That half is the second condition, "an intermediate state would be broken while deployed". Here it reads **broken while public**: this repo is public and its artifacts are standalone deliverables rather than parts of a build, so a stranger can clone `main` at any commit and get whatever the intermediate state was. This repo's own history has the case — `b7c486b` added the git hooks and `2393b35` marked them executable, so a POSIX clone taken between the two got hooks that silently did not run. Nothing about the final state being right makes that window not have existed.
+
+A branch is also what makes `/land` usable: its preflight requires `git branch --show-current` to be something other than `main`, and its `--ff-only` integration preserves the logical commit split `/commit` just wrote instead of squashing it. So work heading for a PR wants a branch from its first commit, not a rescue branch cut afterwards.
+
 ## The push gate
 
 This repo is public and [.githooks/pre-push](.githooks/pre-push) is the last thing between a commit and that. Two checks, both documented at length in the script header:
