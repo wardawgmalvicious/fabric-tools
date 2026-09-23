@@ -23,7 +23,7 @@ pwsh -File .githooks/scrub-fabric-notebook.ps1 path/to/notebook.ipynb
 git commit --no-verify
 ```
 
-The scrubber requires PowerShell 7+ (`pwsh`) on PATH. On this Windows machine, prefer the **PowerShell tool** for shell work.
+The scrubber requires PowerShell 7+ (`pwsh`) on PATH.
 
 ## Branching
 
