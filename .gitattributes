@@ -22,6 +22,14 @@
 
 # --- Repo-specific rules ---
 
+# Tool-generated JSON: pin LF. text=auto with core.eol=native checks these out
+# CRLF on Windows -- .mcp.json already sits that way -- while the tools that
+# write them emit LF (repo-settings.json comes from agent-config's
+# repo-settings.ps1). Git normalizes on add, so this is not about diff noise:
+# it keeps the file on disk byte-identical to what regenerates it. Same
+# reasoning as *.ipynb above.
+*.json text eol=lf
+
 # Shell-based git hooks must stay LF or bash on macOS/Linux rejects the shebang.
 .githooks/*   text eol=lf
 
