@@ -427,15 +427,34 @@ fi
 # row object when it is false, so rows in one result would carry different key
 # sets and the table below would silently misalign its columns. Nulls are
 # rendered as empty cells instead.
-BODY=$(jq -n --arg dax "$QUERY" --arg upn "$IMPERSONATE" '
-    { queries: [ { query: $dax } ], serializerSettings: { includeNulls: true } }
+#
+# The query goes into jq on stdin (-R raw, -s as one string) and the body into
+# curl on stdin, never as an argument, for two reasons. Windows caps a whole
+# command line at 32,767 characters, so a query past about 32 KB — a long
+# DEFINE block does it — fails with "Argument list too long" before any
+# request goes out. And Git Bash's own curl (/mingw64/bin, ahead of System32's
+# on its PATH) decodes its arguments through the ANSI code page: measured with
+# its curl 8.21, an é in an argument went out as the lone byte E9 and 日本 as
+# "??", so non-ASCII text in a query was corrupted at any length.
+#
+# -b is for Windows, where native jq reads stdin in text mode: CRLF arrives as
+# LF, and a 0x1A byte ends the input with no error, so the query would be cut
+# short silently. -b (jq 1.7+) reads it byte for byte. Elsewhere there is no
+# text mode to switch off, and jq 1.6 rejects the flag.
+JQ_BINARY_MODE=()
+case "$OSTYPE" in msys* | cygwin*) JQ_BINARY_MODE=(-b) ;; esac
+BODY=$(printf '%s' "$QUERY" \
+    | jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -Rs --arg upn "$IMPERSONATE" '
+    . as $dax
+    | { queries: [ { query: $dax } ], serializerSettings: { includeNulls: true } }
     + ( if $upn == "" then {} else { impersonatedUserName: $upn } end )
 ')
 
-RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST "$BASE_WS/datasets/$MODEL_ID/executeQueries" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    --data-binary "$BODY")
+RESPONSE=$(printf '%s' "$BODY" \
+    | curl -sS -w '\n%{http_code}' -X POST "$BASE_WS/datasets/$MODEL_ID/executeQueries" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        --data-binary @-)
 HTTP="${RESPONSE##*$'\n'}"
 RESPONSE="${RESPONSE%$'\n'*}"
 
