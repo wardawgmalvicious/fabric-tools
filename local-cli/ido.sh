@@ -13,6 +13,9 @@
 # integration/nb_syteline_ingest.ipynb reads, queried live rather than from a copy. So a
 # bare `ido.sh <Entity>` is the production read request with a small recordCap, and a
 # registration that has drifted from the live IDO fails here the way it would fail the run.
+# Being live, it answers "what will a run in this environment send", not "what does the
+# source-controlled registration say" — a stage whose row predates the latest registration
+# edit shows the old request, which is the drift a live read is for.
 # Overriding any of the three is for exploring, not for reproducing.
 #
 # The properties are derived from the FieldMap's SOURCES, not its field list: the set asked
@@ -107,7 +110,7 @@
 
 set -euo pipefail
 
-for tool in curl jq base64; do
+for tool in curl jq; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "error: $tool not found on PATH" >&2
         exit 1
@@ -289,10 +292,21 @@ for required in ION_API_BASE ION_TENANT ION_MONGOOSE_CONFIG KEY_VAULT_URI; do
 done
 
 # --- Control-table lookup -----------------------------------------------------
-# Shells out to sql.sh so the SQL_ENDPOINT_<NAME> convention has exactly one reader. The
-# result comes back base64-encoded rather than as columns: sqlcmd splits a FOR JSON result
-# across rows at an arbitrary character position, and base64 has no whitespace, so
-# concatenating the chunks is lossless where concatenating trimmed text columns is not.
+# Shells out to sql.sh so the SQL_ENDPOINT_<NAME> convention has exactly one reader.
+#
+# The registration comes back as one JSON_OBJECT scalar per row, not FOR JSON: Fabric
+# Warehouse refuses FOR XML outright and FOR JSON anywhere but the outermost operator, and
+# a top-level FOR JSON arrives split into chunks. JSON escapes every control character, so
+# each row is exactly one line. The flags each close a silent failure, all measured
+# against a Fabric Warehouse with go-sqlcmd:
+#   -y 0  sqlcmd otherwise truncates (max) columns to 256 characters, without warning.
+#   -r1   Fabric sends a "Statement ID: ... | Query hash: ..." info message with every
+#         query touching a table; without -r1 it lands on stdout, mixed into the data.
+#   -b    without it a SQL error exits 0 with the message on stdout, where it reads as
+#         data. With it the query exits 1, stdout stays empty, and the message is on
+#         stderr.
+# -w 65535 is the line width; a row longer than that would wrap, which no FieldMap
+# approaches.
 control_query() {
     local sql="$1" endpoint_args=()
     if [[ ! -x "$SQL_SH" ]]; then
@@ -306,35 +320,35 @@ control_query() {
     [[ -z "$name" ]] || endpoint_args=(-e "$name")
     [[ -z "$ENVNAME" ]] || endpoint_args+=(-E "$ENVNAME")
     "$SQL_SH" ${endpoint_args+"${endpoint_args[@]}"} \
-        -h -1 -W -w 65535 -Q "SET NOCOUNT ON; $sql"
+        -h -1 -W -w 65535 -y 0 -r1 -b -Q "SET NOCOUNT ON; $sql"
 }
 
 sql_string() { printf "'%s'" "${1//\'/\'\'}"; }
 
+# A failed query and a missing row are told apart by exit status, not by output: -b makes
+# the first exit non-zero, and the second exits 0 with no JSON line.
 load_registration() {
-    local entity="$1" encoded decoded
-    # FOR JSON PATH inside a CAST to varbinary, emitted as base64 by FOR XML: see
-    # control_query. WITHOUT_ARRAY_WRAPPER because exactly one row is expected.
-    encoded=$(control_query "
-        SELECT CAST((
-            SELECT TOP 1 SourceWatermark, SourceOrderBy, SourceFilter, FieldMap
-            FROM $CONTROL_TABLE
-            WHERE SourceSystemName = $(sql_string "$CONTROL_SYSTEM")
-              AND SourceObjectName = $(sql_string "$entity")
-            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
-        ) AS varbinary(max)) AS b
-        FOR XML PATH(''), BINARY BASE64;" | tr -d ' \r\n')
-    if [[ -z "$encoded" ]]; then
+    local entity="$1" out row
+    out=$(control_query "
+        SELECT TOP 1 JSON_OBJECT(
+              'SourceWatermark': SourceWatermark
+            , 'SourceOrderBy': SourceOrderBy
+            , 'SourceFilter': SourceFilter
+            , 'FieldMap': FieldMap)
+        FROM $CONTROL_TABLE
+        WHERE SourceSystemName = $(sql_string "$CONTROL_SYSTEM")
+          AND SourceObjectName = $(sql_string "$entity");") || {
+        echo "error: the control-table lookup failed (the cause is printed above)" >&2
+        exit 1
+    }
+    row=$({ grep -m1 '^{' <<<"$out" || true; } | tr -d '\r')
+    if [[ -z "$row" ]]; then
         echo "error: no row in $CONTROL_TABLE for SourceObjectName '$entity'" >&2
         echo "       (SourceSystemName '$CONTROL_SYSTEM'). Register it, pick another" >&2
         echo "       endpoint with -e, or pass -p to probe an unregistered IDO." >&2
         exit 1
     fi
-    decoded=$(printf '%s' "$encoded" | base64 -d 2>/dev/null) || {
-        echo "error: could not decode the control-table response" >&2
-        exit 1
-    }
-    printf '%s' "$decoded"
+    printf '%s' "$row"
 }
 
 # The properties asked of the IDO are the sorted, deduplicated set of Name across every
