@@ -490,8 +490,12 @@ IDO_URL="${ION_API_BASE%/}/$ION_TENANT/$ION_IDO_SUITE/IDORequestService/ido/load
 
 # The bearer travels in a --config block on stdin, never in argv. curl reads `header =
 # "..."` from the file it is told to read, and `-` is stdin.
+#
+# The status code is checked here, before load_rejected ever sees the body. A 401 or 5xx
+# can carry a JSON body with no Items, and load_rejected would then report it as a 200
+# rejection with no Message. Non-2xx is a failure with its own status and body on stderr.
 ido_load() {
-    local properties="$1" cap="$2" response url
+    local properties="$1" cap="$2" response url status
     url="$IDO_URL?properties=$(urlencode "$properties")&recordCap=$cap&loadType=NEXT"
     [[ -z "$FILTER" ]]   || url+="&filter=$(urlencode "$FILTER")"
     [[ -z "$ORDER_BY" ]] || url+="&orderBy=$(urlencode "$ORDER_BY")"
@@ -499,7 +503,19 @@ ido_load() {
         | curl -sS --proto '=https' --config - \
             -H "X-Infor-MongooseConfig: $ION_MONGOOSE_CONFIG" \
             -H 'Accept: application/json' \
-            "$url") || return 1
+            -w '\n%{http_code}' \
+            "$url") || {
+        echo "error: IDO load request failed" >&2
+        return 1
+    }
+    status="${response##*$'\n'}"
+    response="${response%$'\n'*}"
+    if [[ "$status" != 2?? ]]; then
+        echo "error: the IDO load answered HTTP $status:" >&2
+        printf '%s\n' "$response" | head -c 400 >&2
+        echo >&2
+        return 1
+    fi
     printf '%s' "$response"
 }
 
@@ -518,7 +534,10 @@ if [[ "$BISECT" -eq 1 ]]; then
     # makes the ERP parse the property list.
     echo "narrowing ${ENTITY}'s property list to the rejected property..." >&2
     IFS=',' read -r -a ALL_PROPS <<< "$PROPERTIES"
-    if ! load_rejected "$(ido_load "$PROPERTIES" 1)"; then
+    # Each probe is captured before it is tested: a failed load inside the test's own
+    # argument would reach load_rejected as an empty string and read as accepted.
+    PROBE=$(ido_load "$PROPERTIES" 1) || exit 1
+    if ! load_rejected "$PROBE"; then
         echo "the full property list loads cleanly — nothing to narrow" >&2
         exit 0
     fi
@@ -529,7 +548,7 @@ if [[ "$BISECT" -eq 1 ]]; then
         else
             CANDIDATE="$(IFS=','; printf '%s' "${GOOD[*]}"),$prop"
         fi
-        PROBE=$(ido_load "$CANDIDATE" 1)
+        PROBE=$(ido_load "$CANDIDATE" 1) || exit 1
         if load_rejected "$PROBE"; then
             echo >&2
             echo "rejected property: $prop" >&2
@@ -545,10 +564,7 @@ if [[ "$BISECT" -eq 1 ]]; then
     exit 1
 fi
 
-RESPONSE=$(ido_load "$PROPERTIES" "$RECORD_CAP") || {
-    echo "error: IDO load request failed" >&2
-    exit 1
-}
+RESPONSE=$(ido_load "$PROPERTIES" "$RECORD_CAP") || exit 1
 
 if load_rejected "$RESPONSE"; then
     echo "error: the IDO rejected this load (HTTP 200, Items null):" >&2
