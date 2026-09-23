@@ -485,8 +485,9 @@ TOKEN_BODY+="&client_id=$(urlencode "$(get_secret "$SECRET_CLIENT_ID")")"
 TOKEN_BODY+="&client_secret=$(urlencode "$(get_secret "$SECRET_CLIENT_SECRET")")"
 
 # --data @- keeps the four secrets off the command line. --proto '=https' and the absent
-# -L keep them off the wire in cleartext if the URL is wrong.
-TOKEN_RESPONSE=$(printf '%s' "$TOKEN_BODY" | curl -sS --proto '=https' \
+# -L keep them off the wire in cleartext if the URL is wrong. --max-time, here and on the
+# load, turns a stalled connection into curl's exit 28 instead of a hang with no end.
+TOKEN_RESPONSE=$(printf '%s' "$TOKEN_BODY" | curl -sS --proto '=https' --max-time 60 \
     -X POST "$ION_TOKEN_URL" \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data @-) || {
@@ -519,7 +520,7 @@ ido_load() {
     [[ -z "$FILTER" ]]   || url+="&filter=$(urlencode "$FILTER")"
     [[ -z "$ORDER_BY" ]] || url+="&orderBy=$(urlencode "$ORDER_BY")"
     response=$(printf 'header = "Authorization: Bearer %s"\n' "$ION_TOKEN" \
-        | curl -sS --proto '=https' --config - \
+        | curl -sS --proto '=https' --max-time 300 --config - \
             -H "X-Infor-MongooseConfig: $ION_MONGOOSE_CONFIG" \
             -H 'Accept: application/json' \
             -w '\n%{http_code}' \
