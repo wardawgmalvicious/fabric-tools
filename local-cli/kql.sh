@@ -7,7 +7,8 @@
 #
 # There is no `sqlcmd` equivalent for Kusto, so this posts to the cluster's
 # /v1/rest/query endpoint directly with curl and formats the response with jq.
-# Both are required.
+# Both are required, and on Windows jq must be 1.7 or later (see the request
+# body below).
 #
 # NAMED DATABASE ENTRIES, LIKE sql.sh. One Eventhouse exposes ONE query URI, and
 # every KQL database under it shares that URI — so a second database is not a
@@ -372,15 +373,33 @@ fi
 ensure_az_login "$CLUSTER"
 TOKEN=$(az account get-access-token --resource "$CLUSTER" --query accessToken -o tsv)
 
-# jq -n --arg builds the JSON body so quotes, newlines, and backslashes in the
-# query survive; string-concatenating it into the payload would not.
-BODY=$(jq -n --arg db "$DATABASE" --arg csl "$QUERY" '{db: $db, csl: $csl}')
+# jq builds the JSON body so quotes, newlines, and backslashes in the query
+# survive; string-concatenating it into the payload would not.
+#
+# The query goes into jq on stdin (-R raw, -s as one string) and the body into
+# curl on stdin, never as an argument, for two reasons. Windows caps a whole
+# command line at 32,767 characters, so a query past about 32 KB fails with
+# "Argument list too long" before any request goes out. And Git Bash's own
+# curl (/mingw64/bin, ahead of System32's on its PATH) decodes its arguments
+# through the ANSI code page: measured with its curl 8.21, an é in an argument
+# went out as the lone byte E9 and 日本 as "??", so non-ASCII text in a query
+# was corrupted at any length.
+#
+# -b is for Windows, where native jq reads stdin in text mode: CRLF arrives as
+# LF, and a 0x1A byte ends the input with no error, so the query would be cut
+# short silently. -b (jq 1.7+) reads it byte for byte. Elsewhere there is no
+# text mode to switch off, and jq 1.6 rejects the flag.
+JQ_BINARY_MODE=()
+case "$OSTYPE" in msys* | cygwin*) JQ_BINARY_MODE=(-b) ;; esac
+BODY=$(printf '%s' "$QUERY" \
+    | jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -Rs --arg db "$DATABASE" '{db: $db, csl: .}')
 
-RESPONSE=$(curl -sS -X POST "$ENDPOINT" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    --data-binary "$BODY")
+RESPONSE=$(printf '%s' "$BODY" \
+    | curl -sS -X POST "$ENDPOINT" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        --data-binary @-)
 
 # Kusto reports query errors in a 200 body, not the HTTP status, so check the
 # payload rather than curl's exit code.

@@ -77,7 +77,7 @@ Install once per workstation:
 winget install Microsoft.Sqlcmd     # modern Go-based sqlcmd (not the legacy ODBC tool)
 winget install DuckDB.cli           # duckdb on PATH
 winget install Microsoft.AzureCLI   # provides `az login` and credential chain
-winget install jqlang.jq            # jq, used by kql.sh (curl ships with Windows)
+winget install jqlang.jq            # jq 1.7+, used by every curl-based script (curl ships with Windows)
 ```
 
 > Verify the `Microsoft.Sqlcmd` package id with `winget search sqlcmd` if the install fails — Microsoft has historically shipped sqlcmd under a few different package names.
