@@ -385,6 +385,25 @@ if [[ -z "$ENTITY" ]]; then
     exit 1
 fi
 
+# The entity and -n reach the IDO URL unencoded — one as a path segment, the other as
+# recordCap in the query string — so a '?', '#', '/' or '&' in either would reshape the
+# request rather than fail it. -w never reaches the URL raw, but a bad value would
+# otherwise surface as a Python traceback after the control lookup had already run. All
+# three are checked here, before any lookup or token is spent. -w takes fractions:
+# `-w 0.5` is the last twelve hours.
+if ! [[ "$ENTITY" =~ ^[A-Za-z0-9_]+$ ]]; then
+    echo "error: '$ENTITY' is not an IDO name (letters, digits and underscore only)" >&2
+    exit 1
+fi
+if ! [[ "$RECORD_CAP" =~ ^[0-9]+$ ]]; then
+    echo "error: -n takes a whole number of rows, got '$RECORD_CAP'" >&2
+    exit 1
+fi
+if [[ -n "$WINDOW_DAYS" ]] && ! [[ "$WINDOW_DAYS" =~ ^[0-9]*[.]?[0-9]+$ ]]; then
+    echo "error: -w takes a number of days, got '$WINDOW_DAYS'" >&2
+    exit 1
+fi
+
 # --- Resolve the request ------------------------------------------------------
 # The registration is read unless -p makes it unnecessary: -p alone fully specifies an
 # unregistered IDO, so that is the one case with no control lookup at all. -w still forces
