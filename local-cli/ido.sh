@@ -545,6 +545,14 @@ load_rejected() {
     [[ "$(printf '%s' "$1" | jq -r 'if (.Items == null) then "yes" else "no" end')" == "yes" ]]
 }
 
+# What the load sends besides the property list, printed once before it goes, so a
+# rejection, -r and -c all show it too. The -w window is built rather than read, so this
+# is the only place it is visible. `if`, not `[[ ]] &&`: the latter leaves status 1
+# behind whenever the test is false, which becomes the exit status of a successful run
+# if these lines ever end up last.
+if [[ -n "$FILTER" ]]; then printf 'filter: %s\n' "$FILTER" >&2; fi
+if [[ -n "$ORDER_BY" ]]; then printf 'orderBy: %s\n' "$ORDER_BY" >&2; fi
+
 if [[ "$BISECT" -eq 1 ]]; then
     # Grow the property list one at a time and stop at the first addition that flips the
     # load from accepted to rejected — that property is the offender. A linear scan rather
