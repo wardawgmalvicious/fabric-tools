@@ -83,8 +83,10 @@
 #   IDO_CONTROL_SYSTEM      SourceSystemName to match in ingest.Control. Optional,
 #                           defaults to Syteline-ION (the notebook's SOURCE_SYSTEM).
 #   IDO_PYTHON              python interpreter for the -w timezone conversion. Optional,
-#                           defaults to python3 then python. Use e.g. "uv run python"
-#                           on a machine with no system python.
+#                           defaults to whichever of python3, python actually runs. On
+#                           Windows use "uv run --no-project --with tzdata python":
+#                           Windows has no IANA data, so plain "uv run python" raises
+#                           ZoneInfoNotFoundError without the tzdata package.
 #   AZURE_TENANT_ID         optional — passed to `az login` when set
 #
 # Plus the SQL_ENDPOINT_<NAME> / ENV_DEFAULT entries sql.sh already documents: the control
@@ -420,15 +422,19 @@ if [[ -n "$WINDOW_DAYS" ]]; then
         echo "       that looks correct and silently matches the wrong window." >&2
         exit 1
     fi
+    # `command -v` alone is not a test here: on Windows, python3 and python resolve to
+    # Store alias stubs that exit 49 when given arguments. So a candidate has to run.
     PY=$(cfg_value IDO_PYTHON)
     if [[ -z "$PY" ]]; then
-        if command -v python3 >/dev/null 2>&1; then PY="python3"
-        elif command -v python >/dev/null 2>&1; then PY="python"
-        else
-            echo "error: -w needs a python interpreter for the timezone conversion." >&2
-            echo "       Set IDO_PYTHON in $ENV_FILE (e.g. \"uv run python\")." >&2
-            exit 1
-        fi
+        for candidate in python3 python; do
+            if "$candidate" -c '' >/dev/null 2>&1; then PY="$candidate"; break; fi
+        done
+    fi
+    if [[ -z "$PY" ]]; then
+        echo "error: -w needs a python interpreter for the timezone conversion." >&2
+        echo "       Set IDO_PYTHON in $ENV_FILE, e.g." >&2
+        echo "       IDO_PYTHON=uv run --no-project --with tzdata python" >&2
+        exit 1
     fi
     WINDOW_START=$($PY -c '
 import sys
@@ -438,7 +444,7 @@ days, zone = float(sys.argv[1]), sys.argv[2]
 try:
     tz = ZoneInfo(zone)
 except Exception:
-    sys.exit(f"error: unknown timezone {zone!r} — no IANA tzdata? try: pip install tzdata")
+    sys.exit(f"error: unknown timezone {zone!r} - no IANA tzdata? run python with the tzdata package")
 cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 print(cutoff.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S"))
 ' "$WINDOW_DAYS" "$SYTELINE_TIMEZONE") || exit 1
