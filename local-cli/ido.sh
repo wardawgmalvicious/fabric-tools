@@ -157,10 +157,16 @@ cfg_value() {
     env_value "$1"
 }
 
-# The value arrives on stdin rather than through --arg: every caller below passes a vault
-# secret, and an argument would put it in this machine's process list for the life of the
-# call. -R reads it raw, -s slurps the whole stream as one string so a value containing a
-# newline still encodes as a single value, and the output is byte-identical to --arg's.
+# The value arrives on stdin rather than through --arg: the token request below encodes
+# four vault secrets with it, and an argument would put them in this machine's process
+# list for the life of the call. -R reads it raw, and -s slurps the whole stream as one
+# string so a value containing a newline still encodes as a single value.
+#
+# On Windows jq reads stdin in text mode, so a CRLF encodes as a bare LF and a 0x1A byte
+# silently ends the value. No secret carries either, and in a filter or sort order a line
+# break is only whitespace. -b would keep both, and is left off deliberately: the jq -r
+# that reads a filter out of the registration writes each of its line breaks as CRLF,
+# and this read is what turns them back into LF.
 urlencode() { printf '%s' "$1" | jq -Rrs '@uri'; }
 
 usage() {
