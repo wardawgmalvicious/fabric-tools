@@ -334,9 +334,14 @@ TOKEN=$(az account get-access-token --resource "$RESOURCE" --query accessToken -
 # Every GET funnels through here so HTTP failures surface the API's own error
 # payload (which names the real cause: capacity, tenant setting, permissions)
 # instead of curl's silence.
+#
+# The bearer reaches curl in a config block on stdin (--config -), never as an
+# argument, here and in the query request below: a command line is readable by
+# other processes, and process-creation logging records it.
 pbi_get() {
     local url="$1" out http
-    out=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $TOKEN" "$url")
+    out=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" \
+        | curl -sS -w '\n%{http_code}' --config - "$url")
     http="${out##*$'\n'}"
     out="${out%$'\n'*}"
     if [[ "$http" != 2* ]]; then
@@ -437,24 +442,31 @@ fi
 # its curl 8.21, an é in an argument went out as the lone byte E9 and 日本 as
 # "??", so non-ASCII text in a query was corrupted at any length.
 #
+# The bearer rides on stdin too (see pbi_get), and curl has one stdin, so the
+# two share a config block: the bearer as its header line and the body as its
+# data-binary line, which jq writes. The first tojson builds the body and the
+# second quotes it for the config file. Compact JSON holds no raw control
+# character, so the only escapes the second can emit are \" and \\, and curl's
+# config parser undoes exactly those.
+#
 # -b is for Windows, where native jq reads stdin in text mode: CRLF arrives as
 # LF, and a 0x1A byte ends the input with no error, so the query would be cut
 # short silently. -b (jq 1.7+) reads it byte for byte. Elsewhere there is no
 # text mode to switch off, and jq 1.6 rejects the flag.
 JQ_BINARY_MODE=()
 case "$OSTYPE" in msys* | cygwin*) JQ_BINARY_MODE=(-b) ;; esac
-BODY=$(printf '%s' "$QUERY" \
-    | jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -Rs --arg upn "$IMPERSONATE" '
+BODY_LINE=$(printf '%s' "$QUERY" \
+    | jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -Rrs --arg upn "$IMPERSONATE" '
     . as $dax
     | { queries: [ { query: $dax } ], serializerSettings: { includeNulls: true } }
     + ( if $upn == "" then {} else { impersonatedUserName: $upn } end )
+    | "data-binary = \(tojson | tojson)"
 ')
 
-RESPONSE=$(printf '%s' "$BODY" \
+RESPONSE=$(printf 'header = "Authorization: Bearer %s"\n%s\n' "$TOKEN" "$BODY_LINE" \
     | curl -sS -w '\n%{http_code}' -X POST "$BASE_WS/datasets/$MODEL_ID/executeQueries" \
-        -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
-        --data-binary @-)
+        --config -)
 HTTP="${RESPONSE##*$'\n'}"
 RESPONSE="${RESPONSE%$'\n'*}"
 
