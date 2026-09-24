@@ -385,21 +385,29 @@ TOKEN=$(az account get-access-token --resource "$CLUSTER" --query accessToken -o
 # went out as the lone byte E9 and 日本 as "??", so non-ASCII text in a query
 # was corrupted at any length.
 #
+# The bearer goes in on stdin as well: a command line is readable by other
+# processes, and process-creation logging records it. curl has one stdin, so
+# the two share a config block (--config -), the bearer as its header line and
+# the body as its data-binary line, which jq writes. The first tojson builds
+# the body and the second quotes it for the config file. Compact JSON holds no
+# raw control character, so the only escapes the second can emit are \" and
+# \\, and curl's config parser undoes exactly those.
+#
 # -b is for Windows, where native jq reads stdin in text mode: CRLF arrives as
 # LF, and a 0x1A byte ends the input with no error, so the query would be cut
 # short silently. -b (jq 1.7+) reads it byte for byte. Elsewhere there is no
 # text mode to switch off, and jq 1.6 rejects the flag.
 JQ_BINARY_MODE=()
 case "$OSTYPE" in msys* | cygwin*) JQ_BINARY_MODE=(-b) ;; esac
-BODY=$(printf '%s' "$QUERY" \
-    | jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -Rs --arg db "$DATABASE" '{db: $db, csl: .}')
+BODY_LINE=$(printf '%s' "$QUERY" \
+    | jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -Rrs --arg db "$DATABASE" \
+        '{db: $db, csl: .} | "data-binary = \(tojson | tojson)"')
 
-RESPONSE=$(printf '%s' "$BODY" \
+RESPONSE=$(printf 'header = "Authorization: Bearer %s"\n%s\n' "$TOKEN" "$BODY_LINE" \
     | curl -sS -X POST "$ENDPOINT" \
-        -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json" \
-        --data-binary @-)
+        --config -)
 
 # Kusto reports query errors in a 200 body, not the HTTP status, so check the
 # payload rather than curl's exit code.
