@@ -185,9 +185,14 @@ TOKEN=$(az account get-access-token --resource "$RESOURCE" --query accessToken -
 # Every call funnels through here so HTTP failures surface the API's own error
 # payload (which names the real cause: capacity, tenant setting, permissions)
 # instead of curl's silence.
+#
+# The bearer reaches curl in a config block on stdin (--config -), never as an
+# argument, here and in the export and download calls below: a command line is
+# readable by other processes, and process-creation logging records it.
 pbi_get() {
     local url="$1" out http
-    out=$(curl -sS -w '\n%{http_code}' -H "Authorization: Bearer $TOKEN" "$url")
+    out=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" \
+        | curl -sS -w '\n%{http_code}' --config - "$url")
     http="${out##*$'\n'}"
     out="${out%$'\n'*}"
     if [[ "$http" != 2* ]]; then
@@ -230,6 +235,12 @@ BASE="$BASE_WS/reports/$REPORT_ID"
 # Body: bare format for the whole report; a single page needs its internal
 # ReportSection name inside powerBIReportConfiguration, so accept the display
 # name too and translate it.
+#
+# curl has one stdin, so the body travels in the bearer's config block too, as
+# its data-binary line, which jq writes. The first tojson builds the body and
+# the second quotes it for the config file. Compact JSON holds no raw control
+# character, so the only escapes the second can emit are \" and \\, and curl's
+# config parser undoes exactly those.
 if [[ -n "$PAGE" ]]; then
     PAGE_NAME=$(pbi_get "$BASE/pages" \
         | jq -r --arg p "$PAGE" '.value[] | select(.name == $p or .displayName == $p) | .name' | head -n 1)
@@ -237,17 +248,18 @@ if [[ -n "$PAGE" ]]; then
         echo "error: page '$PAGE' not found (names: $(pbi_get "$BASE/pages" | jq -r '[.value[].displayName] | join(", ")'))" >&2
         exit 1
     fi
-    BODY=$(jq -n --arg f "$FORMAT" --arg p "$PAGE_NAME" \
-        '{format: $f, powerBIReportConfiguration: {pages: [{pageName: $p}]}}')
+    BODY_LINE=$(jq -rn --arg f "$FORMAT" --arg p "$PAGE_NAME" \
+        '{format: $f, powerBIReportConfiguration: {pages: [{pageName: $p}]}}
+        | "data-binary = \(tojson | tojson)"')
 else
-    BODY=$(jq -n --arg f "$FORMAT" '{format: $f}')
+    BODY_LINE=$(jq -rn --arg f "$FORMAT" '{format: $f} | "data-binary = \(tojson | tojson)"')
 fi
 
 echo "note: starting $FORMAT export of '$REPORT_NAME'" >&2
-RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST "$BASE/ExportTo" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    --data-binary "$BODY")
+RESPONSE=$(printf 'header = "Authorization: Bearer %s"\n%s\n' "$TOKEN" "$BODY_LINE" \
+    | curl -sS -w '\n%{http_code}' -X POST "$BASE/ExportTo" \
+        -H "Content-Type: application/json" \
+        --config -)
 HTTP="${RESPONSE##*$'\n'}"
 RESPONSE="${RESPONSE%$'\n'*}"
 if [[ "$HTTP" != 2* ]]; then
@@ -293,7 +305,8 @@ fi
 mkdir -p "$OUTDIR"
 
 FILE="$OUTDIR/${REPORT_NAME}${EXT}"
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/exports/$EXPORT_ID/file" -o "$FILE"
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" \
+    | curl -sS --config - "$BASE/exports/$EXPORT_ID/file" -o "$FILE"
 
 if [[ "$EXT" == ".zip" ]]; then
     if command -v unzip >/dev/null 2>&1; then
