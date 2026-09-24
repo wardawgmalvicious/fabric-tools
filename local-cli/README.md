@@ -99,6 +99,11 @@ No SAS keys, no service principal secrets, no connection-string passwords.
 
 `ido.sh` is the one script with a credential that is not an Azure token — the ERP's own OAuth2 service-account keys. They are never stored locally: the Azure CLI session reads them from Key Vault at run time, they reach `curl` on stdin rather than through argv (a process list is world-readable), and the variables holding them are unset as soon as they are spent.
 
+The Azure bearers take the same route: `kql.sh`, `dax.sh` and
+`report-png.sh` hand theirs to `curl` in a `--config -` block on stdin,
+along with any request body, so no token appears in a process list or in a
+log of process starts.
+
 ### All of them log you in automatically
 
 Each probes for a token against its own audience before doing any work, and if the cached session can't produce one it starts an interactive login:
