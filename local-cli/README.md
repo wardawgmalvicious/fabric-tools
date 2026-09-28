@@ -13,7 +13,7 @@ These are templates. Copy them into a client repo at `scripts/data/` and use the
 | [kql.sh](kql.sh) | `curl` + `jq` wrapper around the Kusto query REST API for any AAD-authenticated KQL endpoint — Fabric Eventhouse / KQL database, Azure Data Explorer, Log Analytics ADX proxy. Reads `KUSTO_CLUSTER_URI` and named `KUSTO_DATABASE_<NAME>` entries from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-e` picks a database entry, `-d` passes a database through raw, `-l` lists what's configured. |
 | [dax.sh](dax.sh) | `curl` + `jq` wrapper around the Power BI `executeQueries` REST API — runs DAX against a **published** semantic model and prints the result as a table. Reads `PBI_WORKSPACE_ID` and `PBI_SEMANTIC_MODEL_ID`/`_NAME` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-q`/`-i`/stdin take the query, `-m` picks the model by display name or GUID, `-s` runs a canned model-metadata query, `-u` impersonates a user to test RLS, `-l` lists the workspace's models. |
 | [report-png.sh](report-png.sh) | `curl` + `jq` wrapper around the Power BI `exportToFile` REST API — renders a **published** report's pages to PNG (or PDF) files server-side, no Power BI Desktop involved. Reads `PBI_WORKSPACE_ID` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-r` picks the report by display name or GUID, `-p` a single page, `-f PDF` the format fallback, `-l` lists the workspace's reports. Built as the visual-verification step of an AI-driven report-authoring loop: publish PBIR edits → export PNGs → the agent reviews the rendered pages. |
-| [ido.sh](ido.sh) | `curl` + `jq` wrapper around the Infor ION REST IDO API — a read-only probe against a Syteline (CloudSuite Industrial) entity, the interactive half of [integration/nb_syteline_ingest.ipynb](../integration/nb_syteline_ingest.ipynb). Reads ION connection details and `KEY_VAULT_URI` from `.env` and the four ION credentials from Key Vault. With no `-p`/`-f`/`-o` it reconstructs the *registered* request from the notebook's `ingest.Control` table, so a bare `ido.sh <Entity>` is the production read rather than an approximation of it. `-n` caps rows, `-w` windows by change date, `-c` finds which property the IDO is rejecting, `-r` emits raw JSON, `-l` lists registered entities. |
+| [ido.sh](ido.sh) | `curl` + `jq` wrapper around the Infor ION REST IDO API — a read-only probe against a Syteline (CloudSuite Industrial) entity, the interactive half of [integration/nb_syteline_ingest.ipynb](../integration/nb_syteline_ingest.ipynb). Reads ION connection details and `KEY_VAULT_URI` from `.env` and the four ION credentials from Key Vault. With no `-p`/`-f`/`-o` it reconstructs the *registered* request from the notebook's `ingest.Control` table, so a bare `ido.sh <Entity>` is the production read rather than an approximation of it. `-n` caps rows, `-w` windows by change date, `-c` finds which property the IDO is rejecting, `-i` reads the IDO's definition (its key and every property) instead of rows, `-r` emits raw JSON, `-l` lists registered entities. |
 | [.env.sample](.env.sample) | Template for the client repo's `.env` — every key the scripts read, with placeholder values. Copied to the **client repo root** (not `scripts/data/`) and filled in. |
 
 ### sql.sh — supported endpoints
@@ -64,6 +64,25 @@ Three ION-specific traps the script handles, all of which cost real debugging ti
 - **A rejected load answers HTTP 200.** Mongoose reports a bad property, a malformed filter and an unknown IDO alike as `200` with `Items` null and the reason in `Message`. The status code cannot be the test, so the script inspects the payload and exits non-zero with the ERP's own message. `-c` then adds the properties back one at a time until the load flips, naming the offender.
 - **The response carries more than it was asked for.** Rows can come back with properties in no `FieldMap` — an `_ItemId` is the common one. A notebook reading the `P(...)` sources and nothing else never notices, but it surprises anyone diffing a raw response against a registration.
 - **Change timestamps are server-local, not UTC.** `-w` converts before building the window clause, and `SYTELINE_TIMEZONE` is required with no default — a wrong guess produces a filter that looks correct and silently matches the wrong window. The conversion runs in Python rather than `date` because a Windows box has no IANA tzdata, so `TZ=America/… date` quietly answers in GMT and would produce exactly that filter.
+
+`-i` reads the IDO's definition instead of its rows: its key, and every
+property it exposes with data type, domain and length, from Mongoose's
+`ido/info` endpoint. That answers the question behind any registration
+change, what else this IDO could send, and a load cannot answer it:
+`properties=*` can run past two minutes, or be rejected outright by an IDO
+that binds a property to a missing table. `-i` loads nothing and answers in
+seconds. The `Registered` column marks what the entity's `ingest.Control`
+row requests, read through the same live lookup as a load, and the summary
+names any requested property the IDO no longer exposes, which is `-c`'s
+answer in one call. An unregistered IDO prints with nothing marked.
+
+Compare the key `-i` reports with the key the downstream merge dedups on.
+Stock `SLJobs` keys on `Job + Suffix`, and a merge keyed on `Job` alone
+keeps one row per job number wherever a suffix splits it, with no error
+anywhere. The info endpoint shares the load's first trap, answering an
+unknown IDO with `200` and the reason in `Message`. `ReadOnly` does not
+separate derived properties from stored ones, so the table does not claim
+to (measured 2026-09-27).
 
 `-E`/`-e` pick which SQL endpoint the *registration* is read from, nothing more. There is typically one ION tenant behind every Fabric stage, so the rows come from the same ERP whichever environment is active — the flag changes where the request is looked up, never which system is asked.
 
@@ -383,11 +402,16 @@ scripts/data/ido.sh -c <Entity>
 # Raw response, for piping — the only view that shows unrequested properties
 scripts/data/ido.sh -r <Entity> | jq '.Items[0]'
 
+# The IDO's key and every property it exposes, marked where the registration
+# requests it. Loads no rows, and needs no registration.
+scripts/data/ido.sh -i <Entity>
+scripts/data/ido.sh -i -r <Entity> | jq '.Keys'
+
 # Read the registration from another stage's control table
 scripts/data/ido.sh -E prod <Entity>
 ```
 
-Read-only by construction: the only verbs are an OAuth token request and an IDO load. There is no flag that writes to the ERP, and the control table is only ever read.
+Read-only by construction: the only verbs are an OAuth token request, an IDO load and an IDO info read. There is no flag that writes to the ERP, and the control table is only ever read.
 
 ## AI tool instruction snippet
 
@@ -401,7 +425,7 @@ Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`,
 - `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and named `KUSTO_DATABASE_<NAME>` entries from `.env`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too. `-e <name>` picks another database on the same cluster (one Eventhouse query URI serves all of them), `-l` lists them, `-d <database>` passes one through without an entry. Databases in this repo: `<list-kql-databases>`.
 - `scripts/data/dax.sh` — runs DAX against a published semantic model via the Power BI executeQueries REST API; reads `PBI_WORKSPACE_ID` and `PBI_SEMANTIC_MODEL_ID`/`_NAME` from `.env`. Usage: `scripts/data/dax.sh -q "EVALUATE ..."` or `-i file.dax` or stdin; `-m <name-or-guid>` picks the model, `-l` lists models, `-u <upn>` impersonates a user to test RLS, `-r` emits raw JSON. `-s tables|columns|measures|relationships` lists model metadata — run `-s columns` or `-s measures` before writing a measure rather than guessing at names, data types, or existing logic. This reads the model *after* relationships, calculated columns, and measure logic have been applied, so prefer it over `sql.sh`/`lake.sh` whenever the question is about what a report will actually show (a measure's value, a total, blank behavior) rather than what's in the source. One query per call, one result table per query, 100k-row cap.
 - `scripts/data/report-png.sh` — renders a published Power BI report to PNG files via the exportToFile REST API (no Power BI Desktop); reads `PBI_WORKSPACE_ID` from `.env`. Usage: `scripts/data/report-png.sh -r "<ReportName>"` exports all pages (file paths on stdout — read the PNGs to review the rendered report); `-p <page>` one page, `-l` lists reports, `-f PDF` if PNG export is tenant-disabled. Use after publishing report edits to visually verify layout, sorting, theming, and non-empty visuals.
-- `scripts/data/ido.sh` — read-only probe against a Syteline (Infor CSI) IDO through the ION REST API; reads ION connection details and `KEY_VAULT_URI` from `.env`, credentials from Key Vault. Usage: `scripts/data/ido.sh <Entity>` issues the *registered* request from `ingest.Control` (not an approximation), `-l` lists registered entities, `-n <rows>` caps output, `-w <days>` windows by change date, `-p/-f/-o` override properties/filter/orderBy for exploring, `-r` emits raw JSON, `-c` names the property a failing load is being rejected for. Use it before editing the ingest notebook or a registration — it answers "what does the source actually return" in seconds. A rejected load comes back HTTP 200 with the reason in the body, which the script surfaces as a real error. Entities in this repo: `<list-registered-entities>`.
+- `scripts/data/ido.sh` — read-only probe against a Syteline (Infor CSI) IDO through the ION REST API; reads ION connection details and `KEY_VAULT_URI` from `.env`, credentials from Key Vault. Usage: `scripts/data/ido.sh <Entity>` issues the *registered* request from `ingest.Control` (not an approximation), `-l` lists registered entities, `-n <rows>` caps output, `-w <days>` windows by change date, `-p/-f/-o` override properties/filter/orderBy for exploring, `-r` emits raw JSON, `-c` names the property a failing load is being rejected for, `-i` lists the IDO's key and every property it exposes (marking the registered ones) without loading rows — run it before adding a property to a registration rather than guessing at names. Use it before editing the ingest notebook or a registration — it answers "what does the source actually return" in seconds. A rejected load comes back HTTP 200 with the reason in the body, which the script surfaces as a real error. Entities in this repo: `<list-registered-entities>`.
 - All of these handle auth themselves — they check for a usable Azure CLI token and start an interactive `az login` if there isn't one, so just run them; don't run `az login` first or treat a login prompt as an error. No SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
 - Multi-environment: `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh` picks the environment (`<ENV>_`-prefixed `.env` keys, bare keys as fallback); without it the `ENV_DEFAULT` environment applies. On `ido.sh` it selects only which control table the registration is read from — the ERP behind every stage is the same one. Environments in this repo: `<list-environments>` (default `<default-env>`).
 - Prefer these wrappers for ad-hoc data exploration when the user asks to inspect, sample, count, or query repo data — and default to running them unprompted whenever a question about the data's contents blocks a decision (a column's scale or units, nullability, cardinality, row counts). Check the data and report what you found instead of asking the user to check or hedging on an assumption. Read-only queries against the default environment need no confirmation.

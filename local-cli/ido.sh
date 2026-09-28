@@ -6,7 +6,7 @@
 # question about what the ERP actually returns ("does this IDO expose that property", "what
 # shape is that date", "does the filter match anything") otherwise costs an edit, a run, and
 # a log read. This asks the source directly, in seconds, and changes nothing — the only
-# verbs are OAuth token and IDO load.
+# verbs are OAuth token, IDO load and IDO info.
 #
 # THE REQUEST IS THE REGISTRATION'S, BY DEFAULT. With no -p/-f/-o, the properties, filter
 # and orderBy come from the entity's row in `ingest.Control` — the same control table
@@ -36,6 +36,22 @@
 # requested columns only; -r shows what actually arrived. A notebook reading the P(...)
 # sources and nothing else never notices, but it surprises anyone diffing a raw response
 # against a registration.
+#
+# -i READS THE DEFINITION, NOT THE ROWS. It asks Mongoose's ido/info endpoint for the IDO's
+# key and every property it exposes, with data type, domain and length, and loads nothing,
+# so it answers in seconds; `properties=*` can run past two minutes, or be rejected outright
+# by an IDO that binds a property to a missing table. That is the question behind any
+# registration change: what else could this IDO send? The Registered column marks what the
+# entity's ingest.Control row requests, read through the same live lookup as a load, and
+# the summary names any requested property the IDO no longer exposes, which is -c's answer
+# in one call. An unregistered IDO is the usual reason to run -i, so a missing row prints
+# the table with nothing marked. Compare the key it reports with the key the downstream
+# merge dedups on: stock SLJobs keys on Job + Suffix, and a merge keyed on Job alone keeps
+# one row per job number wherever a suffix splits it, with no error anywhere. Three traps,
+# measured 2026-09-27: an unknown IDO answers HTTP 200 with Properties null, like a
+# rejected load; ReadOnly does not separate derived properties from stored ones (a derived,
+# time-relative flag came back ReadOnly false), so the table does not claim to; and some
+# properties have an empty DataType, which the table leaves blank.
 #
 # NO CREDENTIAL GOES ON A COMMAND LINE. Argv is world-readable — on Windows an unelevated
 # `Get-CimInstance Win32_Process` returns the full command line of a process it did not
@@ -100,6 +116,8 @@
 #   scripts/data/ido.sh -f "<Prop> = '<Value>'" <Entity>   # explicit filter
 #   scripts/data/ido.sh -c <Entity>                    # which property is the IDO rejecting?
 #   scripts/data/ido.sh -r <Entity> | jq '.Items[0]'   # raw response, for piping
+#   scripts/data/ido.sh -i <Entity>                    # the IDO's key and every property
+#   scripts/data/ido.sh -i -r <Entity> | jq '.Keys'    # the raw definition
 #   scripts/data/ido.sh -l                             # list registered entities
 #   scripts/data/ido.sh -E prod <Entity>               # read the registration from prod
 #
@@ -247,6 +265,7 @@ WINDOW_DAYS=""
 RAW=0
 LIST=0
 BISECT=0
+INFO=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -261,6 +280,7 @@ while [[ $# -gt 0 ]]; do
         -r) RAW=1; shift ;;
         -l) LIST=1; shift ;;
         -c) BISECT=1; shift ;;
+        -i) INFO=1; shift ;;
         -*) echo "error: unknown flag '$1' (try -h)" >&2; exit 1 ;;
         *)  ENTITY="$1"; shift ;;
     esac
@@ -333,10 +353,11 @@ control_query() {
 
 sql_string() { printf "'%s'" "${1//\'/\'\'}"; }
 
-# A failed query and a missing row are told apart by exit status, not by output: -b makes
+# Prints the entity's registration as one JSON line, or nothing when it has no row. A
+# failed query and a missing row are told apart by exit status, not by output: -b makes
 # the first exit non-zero, and the second exits 0 with no JSON line.
-load_registration() {
-    local entity="$1" out row
+find_registration() {
+    local entity="$1" out
     out=$(control_query "
         SELECT TOP 1 JSON_OBJECT(
               'SourceWatermark': SourceWatermark
@@ -349,7 +370,15 @@ load_registration() {
         echo "error: the control-table lookup failed (the cause is printed above)" >&2
         exit 1
     }
-    row=$({ grep -m1 '^{' <<<"$out" || true; } | tr -d '\r')
+    { grep -m1 '^{' <<<"$out" || true; } | tr -d '\r'
+}
+
+# The `|| exit 1` is explicit because errexit is off inside a command substitution, and
+# load_registration always runs in one: without it a failed query would fall through and
+# be reported a second time, wrongly, as a missing row.
+load_registration() {
+    local entity="$1" row
+    row=$(find_registration "$entity") || exit 1
     if [[ -z "$row" ]]; then
         echo "error: no row in $CONTROL_TABLE for SourceObjectName '$entity'" >&2
         echo "       (SourceSystemName '$CONTROL_SYSTEM'). Register it, pick another" >&2
@@ -409,14 +438,31 @@ if [[ -n "$WINDOW_DAYS" ]] && ! [[ "$WINDOW_DAYS" =~ ^[0-9]*[.]?[0-9]+$ ]]; then
     echo "error: -w takes a number of days, got '$WINDOW_DAYS'" >&2
     exit 1
 fi
+# -i loads no rows, so the flags that decide what a load asks for are refused rather than
+# ignored: a filter that silently did nothing would read as an answer. -n is only a cap,
+# and there is nothing to cap. -E and -e still apply, since they pick the registration the
+# Registered column is marked from.
+if [[ "$INFO" -eq 1 ]] && [[ "$BISECT" -eq 1 || -n "$PROPERTIES" || -n "$FILTER" \
+        || -n "$ORDER_BY" || -n "$WINDOW_DAYS" ]]; then
+    echo "error: -i reads the IDO's definition, not its rows, so -p, -f, -o, -w and -c" \
+         "do not apply" >&2
+    exit 1
+fi
 
 # --- Resolve the request ------------------------------------------------------
 # The registration is read unless -p makes it unnecessary: -p alone fully specifies an
 # unregistered IDO, so that is the one case with no control lookup at all. -w still forces
 # the lookup even with -p, because the window clause needs the registered SourceWatermark.
 # Whatever was passed explicitly wins over whatever comes back.
+#
+# -i reads the same row for its property list alone, which marks the Registered column. A
+# missing row is not an error there, and PROPERTIES stays empty; a failed query still is.
 WATERMARK_PROPERTY=""
-if [[ -z "$PROPERTIES" || -n "$WINDOW_DAYS" ]]; then
+REGISTRATION=""
+if [[ "$INFO" -eq 1 ]]; then
+    REGISTRATION=$(find_registration "$ENTITY")
+    [[ -z "$REGISTRATION" ]] || PROPERTIES=$(printf '%s' "$REGISTRATION" | properties_from_field_map)
+elif [[ -z "$PROPERTIES" || -n "$WINDOW_DAYS" ]]; then
     REGISTRATION=$(load_registration "$ENTITY")
     [[ -n "$PROPERTIES" ]] || PROPERTIES=$(printf '%s' "$REGISTRATION" | properties_from_field_map)
     [[ -n "$FILTER" ]]     || FILTER=$(printf '%s' "$REGISTRATION" | jq -r '.SourceFilter // ""')
@@ -424,7 +470,7 @@ if [[ -z "$PROPERTIES" || -n "$WINDOW_DAYS" ]]; then
     WATERMARK_PROPERTY=$(printf '%s' "$REGISTRATION" | jq -r '.SourceWatermark // ""')
 fi
 
-if [[ -z "$PROPERTIES" ]]; then
+if [[ "$INFO" -eq 0 && -z "$PROPERTIES" ]]; then
     echo "error: no properties resolved for '$ENTITY' — the registration's FieldMap has" >&2
     echo "       no P(...) sources, or -p was needed and not given" >&2
     exit 1
@@ -511,33 +557,33 @@ if [[ -z "$ION_TOKEN" ]]; then
 fi
 unset TOKEN_RESPONSE
 
-# --- The IDO load -------------------------------------------------------------
-IDO_URL="${ION_API_BASE%/}/$ION_TENANT/$ION_IDO_SUITE/IDORequestService/ido/load/$ENTITY"
+# --- The IDO requests ---------------------------------------------------------
+IDO_SERVICE="${ION_API_BASE%/}/$ION_TENANT/$ION_IDO_SUITE/IDORequestService/ido"
+IDO_URL="$IDO_SERVICE/load/$ENTITY"
 
-# The bearer travels in a --config block on stdin, never in argv. curl reads `header =
-# "..."` from the file it is told to read, and `-` is stdin.
+# One GET against the IDO service, printing the body. The bearer travels in a --config
+# block on stdin, never in argv. curl reads `header = "..."` from the file it is told to
+# read, and `-` is stdin.
 #
-# The status code is checked here, before load_rejected ever sees the body. A 401 or 5xx
-# can carry a JSON body with no Items, and load_rejected would then report it as a 200
-# rejection with no Message. Non-2xx is a failure with its own status and body on stderr.
-ido_load() {
-    local properties="$1" cap="$2" response url status
-    url="$IDO_URL?properties=$(urlencode "$properties")&recordCap=$cap&loadType=NEXT"
-    [[ -z "$FILTER" ]]   || url+="&filter=$(urlencode "$FILTER")"
-    [[ -z "$ORDER_BY" ]] || url+="&orderBy=$(urlencode "$ORDER_BY")"
+# The status code is checked here, before the caller's own rejection test ever sees the
+# body. A 401 or 5xx can carry a JSON body with no Items or Properties, and that test would
+# then report it as a 200 rejection with no Message. Non-2xx is a failure with its own
+# status and body on stderr.
+ion_get() {
+    local url="$1" what="$2" response status
     response=$(printf 'header = "Authorization: Bearer %s"\n' "$ION_TOKEN" \
         | curl -sS --proto '=https' --max-time 300 --config - \
             -H "X-Infor-MongooseConfig: $ION_MONGOOSE_CONFIG" \
             -H 'Accept: application/json' \
             -w '\n%{http_code}' \
             "$url") || {
-        echo "error: IDO load request failed" >&2
+        echo "error: $what request failed" >&2
         return 1
     }
     status="${response##*$'\n'}"
     response="${response%$'\n'*}"
     if [[ "$status" != 2?? ]]; then
-        echo "error: the IDO load answered HTTP $status:" >&2
+        echo "error: the $what answered HTTP $status:" >&2
         printf '%s\n' "$response" | head -c 400 >&2
         echo >&2
         return 1
@@ -545,11 +591,74 @@ ido_load() {
     printf '%s' "$response"
 }
 
+ido_load() {
+    local properties="$1" cap="$2" url
+    url="$IDO_URL?properties=$(urlencode "$properties")&recordCap=$cap&loadType=NEXT"
+    [[ -z "$FILTER" ]]   || url+="&filter=$(urlencode "$FILTER")"
+    [[ -z "$ORDER_BY" ]] || url+="&orderBy=$(urlencode "$ORDER_BY")"
+    ion_get "$url" "IDO load"
+}
+
 # Mongoose answers 200 for a rejected load, with Items null and the reason in Message, so
 # the status code cannot be the test. This is.
 load_rejected() {
     [[ "$(printf '%s' "$1" | jq -r 'if (.Items == null) then "yes" else "no" end')" == "yes" ]]
 }
+
+# --- -i: the IDO's definition -------------------------------------------------
+# One GET with no query string: there is nothing to cap or page. An unknown IDO answers
+# 200 like a rejected load, with Properties null and the reason in Message, so the type of
+# Properties is the test.
+#
+# Rows keep the IDO's own order rather than being sorted. Mongoose groups extension,
+# derived, UI-buffer and bound properties, and the grouping says more about a property
+# than its name does. An empty DataType stays blank: util-linux column 2.40.2 keeps an
+# empty field in its column (measured 2026-09-27), so the row does not shift left.
+if [[ "$INFO" -eq 1 ]]; then
+    RESPONSE=$(ion_get "$IDO_SERVICE/info/$ENTITY" "IDO info") || exit 1
+
+    if ! printf '%s' "$RESPONSE" | jq -e '.Properties | type == "array"' >/dev/null 2>&1; then
+        echo "error: the IDO info request was rejected (HTTP 200, no Properties):" >&2
+        printf '%s' "$RESPONSE" | jq -r '.Message // "(no Message in the response)"' >&2
+        exit 1
+    fi
+
+    if [[ "$RAW" -eq 1 ]]; then
+        printf '%s\n' "$RESPONSE"
+        exit 0
+    fi
+
+    printf '%s' "$RESPONSE" | jq -r --arg props "$PROPERTIES" '
+        ($props | split(",") | map({(.): true}) | add // {}) as $requested
+        | (["Name", "DataType", "Domain", "Length", "Registered"] | @tsv),
+          (.Properties[]
+            | [.Name, .DataType, .ColumnDataType, .Length,
+               (if $requested[.Name // ""] then "yes" else "" end)]
+            | @tsv)
+    ' | column -t -s "$(printf '\t')"
+
+    # The summary is one jq call, not one per line: every spawn costs time on Windows.
+    printf '%s' "$RESPONSE" | jq -r \
+        --arg props "$PROPERTIES" \
+        --arg registered "${REGISTRATION:+yes}" \
+        --arg where "$CONTROL_TABLE (environment ${ENVNAME:-none})" '
+        ($props | split(",") | map(select(. != ""))) as $requested
+        | [.Properties[].Name] as $exposed
+        | [$requested[] | select(IN($exposed[]) | not)] as $gone
+        | "",
+          "\(.Properties | length) properties; key: \(.Keys // []
+              | if length > 0 then join(" + ") else "none reported" end)",
+          if $registered == "" then
+              "no registration in \($where), so nothing is marked"
+          else
+              "the registration in \($where) requests \($requested | length) properties",
+              (if ($gone | length) > 0
+               then "requested but not exposed, so a load rejects them: \($gone | join(", "))"
+               else empty end)
+          end
+    ' >&2
+    exit 0
+fi
 
 # What the load sends besides the property list, printed once before it goes, so a
 # rejection, -r and -c all show it too. The -w window is built rather than read, so this
