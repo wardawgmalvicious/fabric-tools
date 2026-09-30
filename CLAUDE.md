@@ -48,6 +48,52 @@ git -c fabrictools.push=reviewed push <same arguments>
 
 Review the unpushed commits first (`git log -p @{u}..`), and if they are clean, push normally from the session — `CLAUDECODE=1` is already set there, so the gate passes without an override.
 
+## Handoff briefs
+
+Work that will outlive one session is written up as a brief,
+`docs/handoffs/execute/<subject>.md` — named for its subject, with no date
+or number, because the filename is the link target. None exists as of
+2026-09-30, and neither does the directory; the first brief creates it.
+**Each brief holds its own state in frontmatter and no file lists the
+queue**, so starting or landing one edits nothing a parallel session is
+also editing:
+
+```yaml
+---
+status: open
+priority: 2
+needs: []
+blocked-by: []
+written: 2026-09-30
+---
+```
+
+`status` is `open` or `deferred`, and `deferred` adds a `reopen-when:`
+trigger. `priority` is `1` now, `2` next, `3` later — buckets with no order
+inside one, so briefs sharing a bucket can run in parallel. `needs` lists
+what a session cannot supply (`user`, `tenant`, `desktop`, or a short
+phrase) and `blocked-by` lists brief filenames beside this one. Plain
+`key: value` or `key: [a, b]` only — a trailing comment or a quoted value
+fails the check. The body restates none of it, and landing deletes the
+brief in the commit that finishes its work, dropping its name from every
+other `blocked-by`; git history is the archive.
+
+The view comes from agent-config's `scripts/handoff-status.py`, run by path
+from this repo's root. It reads and never writes, `--check` exits 1 on a
+bad value, and a worktree named after a brief's filename stem shows that
+brief as in flight:
+
+```bash
+uv run --no-project <agent-config>/scripts/handoff-status.py . --no-inbox
+```
+
+**A brief is committed, so it is public** — unlike the note it is usually
+triaged from, since `~/handoff-inbox/fabric-tools/` is private and may be
+raw. Cite client material by kind, never by name; identity-guard reads only
+its list. The first brief also brings `docs/handoffs/execute/README.md`,
+which holds no queue: it declares direction (local, inbound or both), what
+public means for scrubbing, and whether these briefs are the whole backlog.
+
 ## The notebook-metadata invariant (most important rule)
 
 Notebooks downloaded from Fabric carry workspace-bound metadata — default lakehouse GUIDs, `spark_compute.compute_id`, `a365ComputeOptions`, `sessionKeepAliveTimeout`, session settings — that **must never be committed**. [.githooks/scrub-fabric-notebook.ps1](.githooks/scrub-fabric-notebook.ps1) rewrites each staged `.ipynb` so only an allowlist survives:
