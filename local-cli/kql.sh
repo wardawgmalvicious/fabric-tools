@@ -15,7 +15,7 @@
 # second endpoint, it is another name against the same host. That is the shape
 # sql.sh already solves with SQL_ENDPOINT_<NAME>, so the same mechanism is used
 # here rather than a second one: name the entries in .env, pick one per run with
-# -e, list them with -l. fabric-tools ships the mechanism; the client repo picks
+# -e, list them with -l. The wrapper ships the mechanism; the client repo picks
 # the names (OPERATION, LOGGING, whatever fits), so nothing project-specific is
 # baked in and the script still works out of the box on a single database.
 #
