@@ -196,8 +196,8 @@ az login --use-device-code --allow-no-subscriptions --scope https://vault.azure.
    PROD_SQL_ENDPOINT_WAREHOUSE=<yyy>.datawarehouse.fabric.microsoft.com/<WarehouseName>
    DEV_KUSTO_CLUSTER_URI=https://<cluster-d>.<region>.kusto.fabric.microsoft.com
    PROD_KUSTO_CLUSTER_URI=https://<cluster-p>.<region>.kusto.fabric.microsoft.com
-   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
-   KUSTO_DATABASE_DEFAULT=OPERATION
+   KUSTO_DATABASE_NAME_1=<KqlDatabaseName>
+   KUSTO_DATABASE_DEFAULT=NAME_1
    DEV_PBI_WORKSPACE_ID=<workspace-guid>
    PBI_SEMANTIC_MODEL_NAME=<SemanticModelName>
    ```
@@ -208,14 +208,14 @@ az login --use-device-code --allow-no-subscriptions --scope https://vault.azure.
 
    ```env
    KUSTO_CLUSTER_URI=https://<cluster>.<region>.kusto.fabric.microsoft.com
-   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
-   KUSTO_DATABASE_LOGGING=<KqlDatabaseName>
-   KUSTO_DATABASE_DEFAULT=OPERATION
+   KUSTO_DATABASE_NAME_1=<KqlDatabaseName>
+   KUSTO_DATABASE_NAME_2=<KqlDatabaseName>
+   KUSTO_DATABASE_DEFAULT=NAME_1
    ```
 
    The Query URI is on the KQL database's detail page in the Fabric portal (or the ADX cluster overview blade). Entry values take the database display name; the item GUID also works.
 
-   **One Eventhouse exposes one query URI, shared by every KQL database under it** — so a second database isn't a second endpoint, it's another name against the same host. That's the shape `SQL_ENDPOINT_<NAME>` already solves, so `kql.sh` uses the same mechanism rather than a second one: name the entries, pick one per run with `-e`, list them with `-l`. Names are yours to choose (`OPERATION`/`LOGGING` above are illustrative, exactly like `WAREHOUSE`/`LAKEHOUSE`); `KUSTO_DATABASE_DEFAULT` picks the one used when `-e` is omitted, and is optional with exactly one entry defined.
+   **One Eventhouse exposes one query URI, shared by every KQL database under it** — so a second database isn't a second endpoint, it's another name against the same host. That's the shape `SQL_ENDPOINT_<NAME>` already solves, so `kql.sh` uses the same mechanism rather than a second one: name the entries, pick one per run with `-e`, list them with `-l`. Names are yours to choose (`NAME_1`/`NAME_2` above are illustrative, exactly like `WAREHOUSE`/`LAKEHOUSE`); `KUSTO_DATABASE_DEFAULT` picks the one used when `-e` is omitted, and is optional with exactly one entry defined.
 
    The original single-slot `KUSTO_DATABASE` is still read, so an existing `.env` needs no edit. It also still *wins* over an auto-picked sole named entry — deliberately, so a repo that adds one named extra beside an existing `KUSTO_DATABASE` keeps resolving to `KUSTO_DATABASE` instead of silently switching. `-d <database>` is unchanged too: it bypasses `.env` entirely and passes the value straight through, for a one-off database with no entry.
 
@@ -304,7 +304,7 @@ scripts/data/kql.sh -i path/to/query.kql
 echo "<Table> | take 5" | scripts/data/kql.sh
 
 # Pick a named database entry from .env (* marks the default in -l)
-scripts/data/kql.sh -e logging -q "<Table> | count"
+scripts/data/kql.sh -e name_2 -q "<Table> | count"
 scripts/data/kql.sh -l
 
 # -d passes a database name/GUID straight through, no .env entry needed

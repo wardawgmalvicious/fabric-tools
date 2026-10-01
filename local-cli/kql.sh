@@ -16,7 +16,7 @@
 # sql.sh already solves with SQL_ENDPOINT_<NAME>, so the same mechanism is used
 # here rather than a second one: name the entries in .env, pick one per run with
 # -e, list them with -l. The wrapper ships the mechanism; the client repo picks
-# the names (OPERATION, LOGGING, whatever fits), so nothing project-specific is
+# the names (NAME_1, NAME_2, whatever fits), so nothing project-specific is
 # baked in and the script still works out of the box on a single database.
 #
 # .env keys:
@@ -33,9 +33,9 @@
 #   AZURE_TENANT_ID         optional — passed to `az login` when set
 #
 #   KUSTO_CLUSTER_URI=https://<cluster>.<region>.kusto.fabric.microsoft.com
-#   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
-#   KUSTO_DATABASE_LOGGING=<KqlDatabaseName>
-#   KUSTO_DATABASE_DEFAULT=OPERATION
+#   KUSTO_DATABASE_NAME_1=<KqlDatabaseName>
+#   KUSTO_DATABASE_NAME_2=<KqlDatabaseName>
+#   KUSTO_DATABASE_DEFAULT=NAME_1
 #
 # Multi-environment repos prefix the keys with an environment name (alnum, no
 # underscore) and pick the environment per run with -E, the FAB_ENV variable,
@@ -49,9 +49,9 @@
 #
 #   SANDBOX_KUSTO_CLUSTER_URI=https://<cluster-s>.<region>.kusto.fabric.microsoft.com
 #   PROD_KUSTO_CLUSTER_URI=https://<cluster-p>.<region>.kusto.fabric.microsoft.com
-#   KUSTO_DATABASE_OPERATION=<KqlDatabaseName>
-#   KUSTO_DATABASE_LOGGING=<KqlDatabaseName>
-#   KUSTO_DATABASE_DEFAULT=OPERATION
+#   KUSTO_DATABASE_NAME_1=<KqlDatabaseName>
+#   KUSTO_DATABASE_NAME_2=<KqlDatabaseName>
+#   KUSTO_DATABASE_DEFAULT=NAME_1
 #   ENV_DEFAULT=SANDBOX
 #
 # Auth note: the token audience is the cluster host itself, not a fixed resource
@@ -65,7 +65,7 @@
 #   echo "<Table> | take 5" | scripts/data/kql.sh
 #
 #   # -e picks a named database entry, -E the environment:
-#   scripts/data/kql.sh -e logging -q "<Table> | count"
+#   scripts/data/kql.sh -e name_2 -q "<Table> | count"
 #   scripts/data/kql.sh -E prod -q "<Table> | count"
 #   scripts/data/kql.sh -l                      # list configured databases
 #
