@@ -14,6 +14,7 @@ These are templates. Copy them into a client repo at `scripts/data/` and use the
 | [dax.sh](dax.sh) | `curl` + `jq` wrapper around the Power BI `executeQueries` REST API — runs DAX against a **published** semantic model and prints the result as a table. Reads `PBI_WORKSPACE_ID` and `PBI_SEMANTIC_MODEL_ID`/`_NAME` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-q`/`-i`/stdin take the query, `-m` picks the model by display name or GUID, `-s` runs a canned model-metadata query, `-u` impersonates a user to test RLS, `-l` lists the workspace's models. |
 | [report-png.sh](report-png.sh) | `curl` + `jq` wrapper around the Power BI `exportToFile` REST API — renders a **published** report's pages to PNG (or PDF) files server-side, no Power BI Desktop involved. Reads `PBI_WORKSPACE_ID` from `.env`, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-r` picks the report by display name or GUID, `-p` a single page, `-f PDF` the format fallback, `-l` lists the workspace's reports. Built as the visual-verification step of an AI-driven report-authoring loop: publish PBIR edits → export PNGs → the agent reviews the rendered pages. |
 | [ido.sh](ido.sh) | `curl` + `jq` wrapper around the Infor ION REST IDO API — a read-only probe against a Syteline (CloudSuite Industrial) entity, the interactive half of [integration/nb_syteline_ingest.ipynb](../integration/nb_syteline_ingest.ipynb). Reads ION connection details and `KEY_VAULT_URI` from `.env` and the four ION credentials from Key Vault. With no `-p`/`-f`/`-o` it reconstructs the *registered* request from the notebook's `ingest.Control` table, so a bare `ido.sh <Entity>` is the production read rather than an approximation of it. `-n` caps rows, `-w` windows by change date, `-c` finds which property the IDO is rejecting, `-i` reads the IDO's definition (its key and every property) instead of rows, `-r` emits raw JSON, `-l` lists registered entities. |
+| [cosmos.sh](cosmos.sh) | `curl` + `jq` wrapper around the Cosmos DB REST API — a read-only reader of a **live** Cosmos DB in Fabric container: queries, point reads, container listings. Reads named `COSMOS_DATABASE_<NAME>` entries (item display names) from `.env` and looks each item's endpoint up through the Fabric API, then authenticates with the Azure CLI token, running `az login` itself if there isn't a usable one. `-c` picks the container, `-p`/`-P` scope to a partition key, `-k` reads one item by id, `-n` caps the items read, `-t` prints a table, `-r` the raw pages, `-l` lists entries and containers. Prints one JSON document per line and the RU total on stderr. |
 | [.env.sample](.env.sample) | Template for the client repo's `.env` — every key the scripts read, with placeholder values. Copied to the **client repo root** (not `scripts/data/`) and filled in. |
 
 ### sql.sh — supported endpoints
@@ -24,6 +25,13 @@ One script covers all of them deliberately — a Fabric workspace exposes a sing
 
 - Fabric SQL Database (`*.database.fabric.microsoft.com`)
 - Fabric Warehouse / Lakehouse SQL endpoint (`*.datawarehouse.fabric.microsoft.com`)
+- Cosmos DB in Fabric's SQL analytics endpoint, over the item's OneLake
+  copy: the same `*.datawarehouse.fabric.microsoft.com` host, the item's
+  display name as the database, and `[<item>].[<container>]` as the table,
+  with no `dbo`. It counted the same items as the live container on
+  2026-10-01, but how far it trails the container has not been measured;
+  [cosmos.sh](#cosmossh--the-live-container-and-the-gateway-rule) reads the
+  live one.
 - Azure SQL Database (`*.database.windows.net`)
 - Azure SQL Managed Instance
 - Synapse dedicated SQL pool
@@ -88,6 +96,86 @@ to (measured 2026-09-27).
 
 The control lookup shells out to `sql.sh` rather than reimplementing the `SQL_ENDPOINT_<NAME>` convention, so there is one reader of it. Copy both, or pass `-p` to skip the lookup entirely and probe an unregistered IDO.
 
+### cosmos.sh — the live container, and the gateway rule
+
+Cosmos DB in Fabric has no `sqlcmd`-style client and needs none. Fabric
+serves Gateway mode only, and Gateway mode is the documented Cosmos DB REST
+API over HTTPS, so `cosmos.sh` is `kql.sh`'s shape: `curl` and `jq`, an
+Azure CLI token, no SDK. Three things differ from the other REST wrappers.
+The token goes in Cosmos's own `Authorization` form,
+`type=aad&ver=1.0&sig=<token>` URL-encoded, not as a bearer. Every request
+carries `x-ms-date` and `x-ms-version`. And errors are real HTTP statuses,
+unlike Kusto's 200 with an error body.
+
+**The endpoint is looked up by name on every run.** An entry holds the
+item's display name, which is also its database name, and the Fabric API
+supplies the host. The host carries the item's GUID, so stored in `.env` it
+would need an `<ENV>_` line per stage, and a stale one would read the
+previous stage's database without complaint. The lookup costs a second
+audience, a Viewer role on the workspace and time: on Windows on
+2026-10-01 a run took 15 to 28 seconds through it and 7 to 15 without.
+`-H <host>` skips it, for a caller with only the item's Read permission
+or a run that should not wait. Fabric hands the host back as
+a URL (`https://<item-id>.z<xy>.sql.cosmos.fabric.microsoft.com`) although
+its REST reference shows a bare host, so the script takes either.
+
+**The gateway refuses some queries across partitions, and the script does
+not merge.** TOP, ORDER BY, OFFSET LIMIT, aggregates, DISTINCT and GROUP BY
+come back `400`, *The provided cross partition query can not be directly
+served by the gateway*, and on 2026-10-01 they did so on a container with a
+single partition key range. An SDK fetches a query plan, runs it per range
+and merges the results. `cosmos.sh` never merges: TOP per range overruns
+its limit, and an AVG or a GROUP BY does not add up, so the output would
+look right and be wrong. On that 400 it reads the container's partition
+key ranges instead. With one, that range is the whole container, so it
+re-runs the query on it and says so on stderr. With more, it fails and
+names the ways out: `-p` for one partition key value, or `sql.sh` for the
+whole container. The ranges are read again on every such run, so a
+container that splits makes it fail loudly rather than go quietly wrong.
+
+**Aggregates over a whole container belong on `sql.sh`.** The item's
+OneLake copy has a SQL analytics endpoint (see
+[supported endpoints](#sqlsh--supported-endpoints)), and `cosmos.sh` is the
+operational reader: the live container, by key, at request-unit cost. Every
+run prints its RU total on stderr, and a point read (`-k`, with its
+partition key) is the cheapest read there is. The total covers every
+request the run made, so leaving `-c` off adds the listing that finds the
+one container: on 2026-10-01 a point read of a 10 KB item cost 1.33 RU, and
+the listing 2.00 more.
+
+Items are nested JSON rather than rows, so each prints as one compact line
+that pipes into `jq` or `grep`; `-t` makes a table, which suits only a flat
+projection, and `-r` prints the raw response pages. Results arrive in pages
+and print as they come: `-n` caps the items read, 100 by default, and
+`-n 0` follows every page. A request that fails with a transient status
+is retried, up to four attempts in all, waiting as long as a 429 asks;
+`COSMOS_RETRY_STATUS` in the script lists the statuses and why each. A
+page that still fails ends the run with exit 1, and stderr says the items
+already printed are only part of the answer.
+
+`-p` sends the partition key as a string, and Cosmos compares typed
+values, so a number, a boolean or a hierarchical key takes `-P` with a
+JSON array (`-P '[5]'`).
+
+Read-only by construction, like `ido.sh`: the only verbs are `GET` and the
+query `POST`.
+
+How far this has been checked: every request shape was probed live on
+2026-10-01 against a portal sample container with one partition key range,
+and later that day the script ran end to end against such a container:
+`-l`, paging, the gateway refusal and the single-range re-run (COUNT,
+DISTINCT, GROUP BY, TOP with ORDER BY), `-p`, `-k`, `-P`, `-H`, non-ASCII
+text and the error paths. Forced into five-item pages, re-run answers
+spanning several came back exact too: DISTINCT and GROUP BY over 4 pages,
+ORDER BY over 167. Those pages were cut by item count; a container big
+enough for Cosmos to cut a scan on time or throughput has not been tried.
+Retries ran live against failures injected into real answers: a page
+retried after a 503 or a 429 resumed exactly where it stopped, and four
+500s in a row gave up as designed. It also runs against a local mock of
+both APIs, real `curl` included. Not yet seen live: a container with
+several ranges, a typed or hierarchical partition key, an expired token, a
+service principal, and macOS or Linux.
+
 ## Required CLI tools
 
 Install once per workstation:
@@ -113,15 +201,16 @@ All scripts piggyback on your Azure CLI session. Each needs a token for a *diffe
 | `report-png.sh` | `https://analysis.windows.net/powerbi/api` | `az account get-access-token --resource <audience>` |
 | `dax.sh` | `https://analysis.windows.net/powerbi/api` | `az account get-access-token --resource <audience>` |
 | `ido.sh` | `https://vault.azure.net` (plus `https://database.windows.net/` via `sql.sh` for the control lookup) | `az account get-access-token --resource <audience>`; the Azure token only *fetches* the ION credentials, which mint a separate ION bearer |
+| `cosmos.sh` | `https://cosmos.azure.com` (plus `https://api.fabric.microsoft.com` for the endpoint lookup) | `az account get-access-token --resource <audience>`, sent in Cosmos's `type=aad` `Authorization` form rather than as a bearer |
 
 No SAS keys, no service principal secrets, no connection-string passwords.
 
 `ido.sh` is the one script with a credential that is not an Azure token — the ERP's own OAuth2 service-account keys. They are never stored locally: the Azure CLI session reads them from Key Vault at run time, they reach `curl` on stdin rather than through argv (a process list is world-readable), and the variables holding them are unset as soon as they are spent.
 
-The Azure bearers take the same route: `kql.sh`, `dax.sh` and
-`report-png.sh` hand theirs to `curl` in a `--config -` block on stdin,
-along with any request body, so no token appears in a process list or in a
-log of process starts.
+The Azure bearers take the same route: `kql.sh`, `dax.sh`,
+`report-png.sh` and `cosmos.sh` hand theirs to `curl` in a `--config -`
+block on stdin, along with any request body, so no token appears in a
+process list or in a log of process starts.
 
 ### All of them log you in automatically
 
@@ -142,6 +231,11 @@ Two details of that command are deliberate:
 
 The probe asks for the specific audience rather than checking `az account show`, because under Conditional Access a session can be valid while still unable to mint a token for the target — `az account show` succeeds and the query still fails.
 
+`cosmos.sh` needs two audiences, and each `az` call is a Python start-up
+(about 2.8 s on Windows, measured 2026-10-01), so it drops the separate
+probe: it mints each token and treats a failure as the probe, and it mints
+the Cosmos token in the background while the Fabric lookup runs.
+
 Knobs, both optional:
 
 - `AZURE_TENANT_ID` — passed as `--tenant`. Read from the environment first, then from `.env`. Only needed for an account that is a guest in more than one tenant, where an unqualified login lands in the home tenant and mints a token the endpoint rejects. (`lake.sh` reads nothing else from `.env` and runs fine without one.)
@@ -155,6 +249,8 @@ az login --use-device-code --allow-no-subscriptions --scope https://storage.azur
 az login --use-device-code --allow-no-subscriptions --scope "https://<cluster>.<region>.kusto.fabric.microsoft.com/.default"
 az login --use-device-code --allow-no-subscriptions --scope "https://analysis.windows.net/powerbi/api/.default"
 az login --use-device-code --allow-no-subscriptions --scope https://vault.azure.net/.default
+az login --use-device-code --allow-no-subscriptions --scope https://cosmos.azure.com/.default
+az login --use-device-code --allow-no-subscriptions --scope https://api.fabric.microsoft.com/.default
 ```
 
 ## Deployment into a client repo
@@ -168,6 +264,7 @@ az login --use-device-code --allow-no-subscriptions --scope https://vault.azure.
    <client-repo>/scripts/data/report-png.sh
    <client-repo>/scripts/data/dax.sh
    <client-repo>/scripts/data/ido.sh          # only for a Syteline/ION source; needs sql.sh beside it
+   <client-repo>/scripts/data/cosmos.sh       # only for a Cosmos DB in Fabric item
    ```
 
    (All scripts assume this exact two-deep location — they resolve the repo root via `SCRIPT_DIR/../..` to find `.env`.)
@@ -202,7 +299,7 @@ az login --use-device-code --allow-no-subscriptions --scope https://vault.azure.
    PBI_SEMANTIC_MODEL_NAME=<SemanticModelName>
    ```
 
-   The environment is chosen by `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh`, else the `FAB_ENV` environment variable, else `ENV_DEFAULT` in `.env`; with none of the three set only bare keys are read (single-environment behavior, fully backward compatible). Lookup is `<ENV>_<KEY>` first, bare `<KEY>` as fallback — deployment pipelines keep item *display names* identical across stages, so typically only hosts, cluster URIs, and workspace GUIDs get prefixed while name-valued keys (`KUSTO_DATABASE_<NAME>` entries, the `/<database>` suffix inside each endpoint value) are written once. Environment names are alphanumeric only (no underscores — the key parse would be ambiguous). Point `ENV_DEFAULT` at the safe environment so reaching prod always takes an explicit `-E prod`. `lake.sh` has no environment flag — its connection details are inline in each ABFSS URL. `kql.sh` additionally accepts `-e <name>` to pick another database on the same cluster (a logging database beside the operational one), and `-d <database>` to pass one through without an entry.
+   The environment is chosen by `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh` / `cosmos.sh`, else the `FAB_ENV` environment variable, else `ENV_DEFAULT` in `.env`; with none of the three set only bare keys are read (single-environment behavior, fully backward compatible). Lookup is `<ENV>_<KEY>` first, bare `<KEY>` as fallback — deployment pipelines keep item *display names* identical across stages, so typically only hosts, cluster URIs, and workspace GUIDs get prefixed while name-valued keys (`KUSTO_DATABASE_<NAME>` entries, the `/<database>` suffix inside each endpoint value) are written once. Environment names are alphanumeric only (no underscores — the key parse would be ambiguous). Point `ENV_DEFAULT` at the safe environment so reaching prod always takes an explicit `-E prod`. `lake.sh` has no environment flag — its connection details are inline in each ABFSS URL. `kql.sh` additionally accepts `-e <name>` to pick another database on the same cluster (a logging database beside the operational one), and `-d <database>` to pass one through without an entry.
 
 6. For `kql.sh`, fill in the cluster URI and one entry per KQL database:
 
@@ -239,7 +336,27 @@ az login --use-device-code --allow-no-subscriptions --scope https://vault.azure.
 
    **The `_ID`/`_NAME` suffix is a rule, not a label.** A GUID is stage-specific, so an `_ID` key must carry an `<ENV>_` prefix; a display name survives dev/test/prod promotion unchanged, so a `_NAME` key is written once, bare. That is why the suffix belongs in the key: it tells the next person whether to prefix it. Prefer names where a script accepts them — they keep `.env` reviewable (a GUID diff tells you nothing about what it points at), and a wrong name fails loudly with "not found" where a stale GUID silently queries the previous target. Reach for a GUID where one is required (`PBI_WORKSPACE_ID`) or where two items share a display name. `dax.sh` warns on stderr if a value lands in the key of the wrong type, since that means the prefix rule is being applied to the wrong thing.
 
-10. **Optional: tell the repo's AI tools the wrappers exist.** Drop the [snippet below](#ai-tool-instruction-snippet) into whichever instruction file your AI tool of choice reads. The same markdown content works for all of them.
+10. For `cosmos.sh`, add one entry per Cosmos DB item, valued with the
+    item's display name:
+
+    ```env
+    COSMOS_DATABASE_MAIN=<CosmosDbItemName>
+    COSMOS_DATABASE_DEFAULT=MAIN
+    ```
+
+    The display name is also the database name: Fabric sets one from the
+    other at creation, makes it read-only, and does not rename the item,
+    so an entry is written once, bare, like any name-valued key. The
+    endpoint is looked up in `PBI_WORKSPACE_ID`'s workspace, which suits
+    items that sit beside the reports; set `COSMOS_WORKSPACE_ID` when they
+    live elsewhere. Either is `<ENV>_`-prefixed per stage, and `-w` passes
+    another workspace for one run. `cosmos.sh -l` lists the entries and the
+    resolved database's containers with their partition key paths, or,
+    with no entry yet, the workspace's Cosmos DB items. Reading needs the
+    item's Read permission, and the lookup a Viewer role on the workspace;
+    `-H <host>` with `-d <ItemName>` skips the lookup and needs no `.env`.
+
+11. **Optional: tell the repo's AI tools the wrappers exist.** Drop the [snippet below](#ai-tool-instruction-snippet) into whichever instruction file your AI tool of choice reads. The same markdown content works for all of them.
 
    | Tool | File path |
    | --- | --- |
@@ -413,6 +530,48 @@ scripts/data/ido.sh -E prod <Entity>
 
 Read-only by construction: the only verbs are an OAuth token request, an IDO load and an IDO info read. There is no flag that writes to the ERP, and the control table is only ever read.
 
+### cosmos.sh
+
+```bash
+# The entries, and the default database's containers with their partition keys
+scripts/data/cosmos.sh -l
+
+# A query; one JSON document per line, the RU total on stderr
+scripts/data/cosmos.sh -c <container> -q "SELECT * FROM c WHERE c.status = 'open'"
+
+# Every page rather than the first 100 items, piped on
+scripts/data/cosmos.sh -c <container> -n 0 -q "SELECT VALUE c.id FROM c" | jq -r .
+
+# An aggregate: on a one-range container the script re-runs it on that range
+scripts/data/cosmos.sh -c <container> -q "SELECT VALUE COUNT(1) FROM c"
+
+# Scoped to one partition key value, where the whole query surface works
+scripts/data/cosmos.sh -c <container> -p <value> -q "SELECT TOP 5 * FROM c ORDER BY c._ts DESC"
+
+# A point read by id and partition key, the cheapest read there is
+scripts/data/cosmos.sh -c <container> -p <value> -k <id>
+
+# A typed or hierarchical partition key
+scripts/data/cosmos.sh -c <container> -P '[5]' -k <id>
+scripts/data/cosmos.sh -c <container> -P '["<tenant>", "<day>"]' -q "SELECT * FROM c"
+
+# A flat projection as a table, or the raw response pages
+scripts/data/cosmos.sh -c <container> -t -q "SELECT c.id, c.status FROM c"
+scripts/data/cosmos.sh -c <container> -r -q "SELECT * FROM c" | jq '.Documents | length'
+
+# Another entry, environment, item or workspace
+scripts/data/cosmos.sh -e main -E prod -c <container> -q "SELECT VALUE COUNT(1) FROM c"
+scripts/data/cosmos.sh -d <ItemName> -w <workspace-guid> -l
+
+# Skip the Fabric lookup, given the endpoint from the item's settings
+scripts/data/cosmos.sh -H <item-id>.z<xy>.sql.cosmos.fabric.microsoft.com -d <ItemName> -l
+```
+
+On a container with more than one partition key range, a cross-partition
+aggregate, TOP, ORDER BY, OFFSET LIMIT, DISTINCT or GROUP BY fails with the
+ways out rather than a merged answer; see
+[the gateway rule](#cosmossh--the-live-container-and-the-gateway-rule).
+
 ## AI tool instruction snippet
 
 Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`, `.github/copilot-instructions.md`, `AGENTS.md` — see the deployment-step table above). The content is the same for all three:
@@ -426,8 +585,9 @@ Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`,
 - `scripts/data/dax.sh` — runs DAX against a published semantic model via the Power BI executeQueries REST API; reads `PBI_WORKSPACE_ID` and `PBI_SEMANTIC_MODEL_ID`/`_NAME` from `.env`. Usage: `scripts/data/dax.sh -q "EVALUATE ..."` or `-i file.dax` or stdin; `-m <name-or-guid>` picks the model, `-l` lists models, `-u <upn>` impersonates a user to test RLS, `-r` emits raw JSON. `-s tables|columns|measures|relationships` lists model metadata — run `-s columns` or `-s measures` before writing a measure rather than guessing at names, data types, or existing logic. This reads the model *after* relationships, calculated columns, and measure logic have been applied, so prefer it over `sql.sh`/`lake.sh` whenever the question is about what a report will actually show (a measure's value, a total, blank behavior) rather than what's in the source. One query per call, one result table per query, 100k-row cap.
 - `scripts/data/report-png.sh` — renders a published Power BI report to PNG files via the exportToFile REST API (no Power BI Desktop); reads `PBI_WORKSPACE_ID` from `.env`. Usage: `scripts/data/report-png.sh -r "<ReportName>"` exports all pages (file paths on stdout — read the PNGs to review the rendered report); `-p <page>` one page, `-l` lists reports, `-f PDF` if PNG export is tenant-disabled. Use after publishing report edits to visually verify layout, sorting, theming, and non-empty visuals.
 - `scripts/data/ido.sh` — read-only probe against a Syteline (Infor CSI) IDO through the ION REST API; reads ION connection details and `KEY_VAULT_URI` from `.env`, credentials from Key Vault. Usage: `scripts/data/ido.sh <Entity>` issues the *registered* request from `ingest.Control` (not an approximation), `-l` lists registered entities, `-n <rows>` caps output, `-w <days>` windows by change date, `-p/-f/-o` override properties/filter/orderBy for exploring, `-r` emits raw JSON, `-c` names the property a failing load is being rejected for, `-i` lists the IDO's key and every property it exposes (marking the registered ones) without loading rows — run it before adding a property to a registration rather than guessing at names. Use it before editing the ingest notebook or a registration — it answers "what does the source actually return" in seconds. A rejected load comes back HTTP 200 with the reason in the body, which the script surfaces as a real error. Entities in this repo: `<list-registered-entities>`.
+- `scripts/data/cosmos.sh` — read-only reader of a live Cosmos DB in Fabric container through the Cosmos DB REST API; reads `COSMOS_DATABASE_<NAME>` entries (item display names) from `.env` and looks the endpoint up through Fabric. Usage: `scripts/data/cosmos.sh -c <container> -q "SELECT ... FROM c"` or `-i file` or stdin; prints one JSON document per line (pipe into `jq`) and the RU cost on stderr. `-l` lists entries and each container's partition key — run it before writing a query rather than guessing at container or key names. `-p <value>` scopes to a partition key value (`-P '[5]'` for a typed or hierarchical key), `-k <id>` with `-p` is a point read, `-n <max>` caps items (100 by default, `0` for all), `-t` prints a table, `-r` raw pages, `-e <name>` picks another entry. A cross-partition TOP, ORDER BY, aggregate, DISTINCT or GROUP BY runs only on a single-range container; elsewhere it fails by design rather than merging per-range results, so scope it with `-p` or run whole-container aggregates on the item's SQL analytics endpoint with `sql.sh` (table `[<item>].[<container>]`). Containers in this repo: `<list-containers-and-keys>`.
 - All of these handle auth themselves — they check for a usable Azure CLI token and start an interactive `az login` if there isn't one, so just run them; don't run `az login` first or treat a login prompt as an error. No SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
-- Multi-environment: `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh` picks the environment (`<ENV>_`-prefixed `.env` keys, bare keys as fallback); without it the `ENV_DEFAULT` environment applies. On `ido.sh` it selects only which control table the registration is read from — the ERP behind every stage is the same one. Environments in this repo: `<list-environments>` (default `<default-env>`).
+- Multi-environment: `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh` / `cosmos.sh` picks the environment (`<ENV>_`-prefixed `.env` keys, bare keys as fallback); without it the `ENV_DEFAULT` environment applies. On `ido.sh` it selects only which control table the registration is read from — the ERP behind every stage is the same one. Environments in this repo: `<list-environments>` (default `<default-env>`).
 - Prefer these wrappers for ad-hoc data exploration when the user asks to inspect, sample, count, or query repo data — and default to running them unprompted whenever a question about the data's contents blocks a decision (a column's scale or units, nullability, cardinality, row counts). Check the data and report what you found instead of asking the user to check or hedging on an assumption. Read-only queries against the default environment need no confirmation.
 ```
 

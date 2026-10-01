@@ -36,6 +36,7 @@ fabric-tools/
 │   └── README.md
 ├── local-cli/          # Local-workstation CLI wrappers (sqlcmd, DuckDB, curl + jq over REST) for ad-hoc Fabric data exploration
 │   ├── .env.sample
+│   ├── cosmos.sh
 │   ├── dax.sh
 │   ├── ido.sh
 │   ├── kql.sh
