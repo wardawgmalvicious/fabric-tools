@@ -1,5 +1,6 @@
 {
-  "_comment": "Managed by scripts/repo-settings.ps1 (-Export / -Check / -Apply). Visibility and the social preview image are deliberately not here; see the script header.",
+  "_comment": "Managed by repo-settings.ps1, from the recreate-repo skill (-Export / -Check / -Apply). Visibility and the social preview image are deliberately not here; see the script header.",
+  "_repo": "wardawgmalvicious/fabric-tools",
   "repository": {
     "description": "SP-first, parameterized Microsoft Fabric notebooks, local CLI wrappers and Copilot config templates - built to slot into CI/CD rather than portal clicks.",
     "homepage": null,
