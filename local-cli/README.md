@@ -607,21 +607,61 @@ ways out rather than a merged answer; see
 
 ## AI tool instruction snippet
 
-Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`, `.github/copilot-instructions.md`, `AGENTS.md` — see the deployment-step table above). The content is the same for all three:
+Paste this into whichever AI instruction file the client repo uses (`CLAUDE.md`, `.github/copilot-instructions.md`, `AGENTS.md` — see the deployment-step table above). The content is the same for all three.
+
+It is an index, not a manual. Every session in the repo loads it, so it
+names the wrappers and when to reach for each, and leaves flags to `-h`
+wherever a script has one: `-h` prints the header of the copy the repo
+actually has, where a pasted flag list goes stale as soon as a script
+changes.
 
 ```markdown
 ## Local data wrappers (scripts/data/)
 
-- `scripts/data/sql.sh` — sqlcmd wrapper for the repo's T-SQL endpoints (Fabric SQL DB / Fabric Warehouse / Azure SQL DB); reads `SQL_ENDPOINT_<NAME>` entries from `.env`. Usage: `scripts/data/sql.sh -Q "SELECT ..."` or `-i file.sql` or stdin; `-e <name>` picks an endpoint, `-d <database>` targets another item on the same host, `-l` lists endpoints.
-- `scripts/data/lake.sh` — DuckDB wrapper for OneLake Delta tables; pre-loads delta/azure extensions and an `az`-CLI-chain secret. Usage: `scripts/data/lake.sh -c "SELECT ... FROM delta_scan('abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<lakehouse>.Lakehouse/Tables/<schema>/<table>')"` or no-args for REPL.
-- `scripts/data/kql.sh` — curl+jq wrapper for the repo's KQL endpoint (Fabric Eventhouse / ADX); reads `KUSTO_CLUSTER_URI` and named `KUSTO_DATABASE_<NAME>` entries from `.env`. Usage: `scripts/data/kql.sh -q "<Table> | take 5"` or `-i file.kql` or stdin; `.show ...` commands work too. `-e <name>` picks another database on the same cluster (one Eventhouse query URI serves all of them), `-l` lists them, `-d <database>` passes one through without an entry. Databases in this repo: `<list-kql-databases>`.
-- `scripts/data/dax.sh` — runs DAX against a published semantic model via the Power BI executeQueries REST API; reads `PBI_WORKSPACE_ID` and `PBI_SEMANTIC_MODEL_ID`/`_NAME` from `.env`. Usage: `scripts/data/dax.sh -q "EVALUATE ..."` or `-i file.dax` or stdin; `-m <name-or-guid>` picks the model, `-l` lists models, `-u <upn>` impersonates a user to test RLS, `-r` emits raw JSON. `-s tables|columns|measures|relationships` lists model metadata — run `-s columns` or `-s measures` before writing a measure rather than guessing at names, data types, or existing logic. This reads the model *after* relationships, calculated columns, and measure logic have been applied, so prefer it over `sql.sh`/`lake.sh` whenever the question is about what a report will actually show (a measure's value, a total, blank behavior) rather than what's in the source. One query per call, one result table per query, 100k-row cap.
-- `scripts/data/report-png.sh` — renders a published Power BI report to PNG files via the exportToFile REST API (no Power BI Desktop); reads `PBI_WORKSPACE_ID` from `.env`. Usage: `scripts/data/report-png.sh -r "<ReportName>"` exports all pages (file paths on stdout — read the PNGs to review the rendered report); `-p <page>` one page, `-l` lists reports, `-f PDF` if PNG export is tenant-disabled. Use after publishing report edits to visually verify layout, sorting, theming, and non-empty visuals.
-- `scripts/data/ido.sh` — read-only probe against a Syteline (Infor CSI) IDO through the ION REST API; reads ION connection details and `KEY_VAULT_URI` from `.env`, credentials from Key Vault. Usage: `scripts/data/ido.sh <Entity>` issues the *registered* request from `ingest.Control` (not an approximation), `-l` lists registered entities, `-n <rows>` caps output, `-w <days>` windows by change date, `-p/-f/-o` override properties/filter/orderBy for exploring, `-r` emits raw JSON, `-c` names the property a failing load is being rejected for, `-i` lists the IDO's key and every property it exposes (marking the registered ones) without loading rows — run it before adding a property to a registration rather than guessing at names. Use it before editing the ingest notebook or a registration — it answers "what does the source actually return" in seconds. A rejected load comes back HTTP 200 with the reason in the body, which the script surfaces as a real error. Entities in this repo: `<list-registered-entities>`.
-- `scripts/data/cosmos.sh` — read-only reader of a live Cosmos DB in Fabric container through the Cosmos DB REST API; reads `COSMOS_DATABASE_<NAME>` entries (item display names) from `.env` and looks the endpoint up through Fabric. Usage: `scripts/data/cosmos.sh -c <container> -q "SELECT ... FROM c"` or `-i file` or stdin; prints one JSON document per line (pipe into `jq`) and the RU cost on stderr. `-l` lists entries and each container's partition key — run it before writing a query rather than guessing at container or key names. `-p <value>` scopes to a partition key value (`-P '[5]'` for a typed or hierarchical key), `-k <id>` with `-p` is a point read, `-n <max>` caps items (100 by default, `0` for all), `-t` prints a table, `-r` raw pages, `-e <name>` picks another entry. A cross-partition TOP, ORDER BY, aggregate, DISTINCT or GROUP BY runs only on a single-range container; elsewhere it fails by design rather than merging per-range results, so scope it with `-p` or run whole-container aggregates on the item's SQL analytics endpoint with `sql.sh` (table `[<item>].[<container>]`). Containers in this repo: `<list-containers-and-keys>`.
-- All of these handle auth themselves — they check for a usable Azure CLI token and start an interactive `az login` if there isn't one, so just run them; don't run `az login` first or treat a login prompt as an error. No SAS or stored credentials. Schemas in this repo: `<list-known-schemas>`.
-- Multi-environment: `-E <env>` on `sql.sh` / `kql.sh` / `report-png.sh` / `dax.sh` / `cosmos.sh` picks the environment (`<ENV>_`-prefixed `.env` keys, bare keys as fallback); without it the `ENV_DEFAULT` environment applies. On `ido.sh` it selects only which control table the registration is read from — the ERP behind every stage is the same one. Environments in this repo: `<list-environments>` (default `<default-env>`).
-- Prefer these wrappers for ad-hoc data exploration when the user asks to inspect, sample, count, or query repo data — and default to running them unprompted whenever a question about the data's contents blocks a decision (a column's scale or units, nullability, cardinality, row counts). Check the data and report what you found instead of asking the user to check or hedging on an assumption. Read-only queries against the default environment need no confirmation.
+Bash scripts that query this repo's data, configured from `.env` at the
+repo root. On Windows, run them in Git Bash, not PowerShell. Every
+wrapper but `sql.sh` and `lake.sh` prints its flags, usage and `.env`
+keys with `-h`; read that rather than guess at a flag.
+
+- `sql.sh` — T-SQL endpoints through sqlcmd: `-Q "<query>"`, `-i <file>`
+  or stdin; `-e <name>` picks an endpoint, `-d <database>` another item on
+  the same host, and every other flag goes to sqlcmd, `-h` included.
+- `lake.sh` — OneLake Delta tables through DuckDB, or a REPL with no
+  arguments:
+  `scripts/data/lake.sh -c "SELECT ... FROM delta_scan('abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<lakehouse>.Lakehouse/Tables/<schema>/<table>')"`
+- `kql.sh` — KQL databases (Eventhouse, Azure Data Explorer).
+- `dax.sh` — DAX against a published semantic model, after relationships,
+  calculated columns and measures apply: what a report will show, where
+  `sql.sh` and `lake.sh` read the tables beneath it. Run `-s columns` or
+  `-s measures` before writing a measure.
+- `report-png.sh` — a published report's pages as PNG files; run it after
+  publishing a report edit, then read the PNGs.
+- `ido.sh` — a Syteline IDO through ION, read-only. `ido.sh <Entity>`
+  sends the entity's registered request, and `-i <Entity>` lists the
+  IDO's key and properties: check it before adding one to a registration.
+- `cosmos.sh` — a live Cosmos DB in Fabric container, read-only; `-l`
+  lists containers and partition keys, to check before writing a query.
+  A whole-container aggregate goes to `sql.sh` instead, on the item's SQL
+  analytics endpoint: the item's name as the database,
+  `[<item>].[<container>]` as the table.
+
+Every wrapper but `lake.sh` lists what this repo has configured or can
+reach with `-l`, and takes `-E <env>` for an environment other than the
+default. Each runs `az login` itself when it has no usable token, so
+don't log in first or treat the prompt as an error.
+
+Prefer these wrappers for ad-hoc data exploration when the user asks to
+inspect, sample, count, or query repo data — and default to running them
+unprompted whenever a question about the data's contents blocks a
+decision (a column's scale or units, nullability, cardinality, row
+counts). Check the data and report what you found instead of asking the
+user to check or hedging on an assumption. Read-only queries against the
+default environment need no confirmation.
 ```
 
-Replace `<list-known-schemas>` with the actual schemas in the client lakehouse, and drop the T-SQL endpoint flavors that don't apply to the repo. If the repo has more than one SQL endpoint configured, list the endpoint names and what each serves.
+Delete the line of any wrapper the repo did not copy; nothing else needs
+filling in. Copies pasted before 2026-10-12 are the long form, which
+spells out every flag and has `<list-…>` placeholders that `-l` now
+answers. Replace one with this, and move anything repo-specific it held
+that `-l` cannot list, such as which schema holds what, into the repo's
+own docs.

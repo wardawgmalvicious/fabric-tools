@@ -53,7 +53,8 @@
 #   scripts/data/dax.sh -E prod -q "EVALUATE ROW ( \"n\", COUNTROWS ( 'Sales' ) )"
 #   scripts/data/dax.sh -l                      # list models in the workspace
 #
-#   # -s runs a canned model-metadata query (see "Schema shortcuts" below):
+#   # -s tables|columns|measures|relationships runs a canned model-metadata
+#   # query (see "Schema shortcuts" below):
 #   scripts/data/dax.sh -s columns | grep -i amount
 #   scripts/data/dax.sh -s measures
 #
