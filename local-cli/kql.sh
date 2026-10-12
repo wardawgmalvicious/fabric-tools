@@ -103,6 +103,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
 
+# -h is answered before the .env check so the usage text is readable from a
+# checkout that has not been configured yet — which is when it is most wanted.
+# Print the header block: line 2 through the first blank line. A fixed line
+# range silently drifts out of date every time the header is edited.
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    esac
+done
+
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "error: .env not found at $ENV_FILE" >&2
     exit 1
@@ -230,9 +240,7 @@ while [[ $# -gt 0 ]]; do
         -e) ENTRY="$2"; shift 2 ;;
         -d) DATABASE_OVERRIDE="$2"; shift 2 ;;
         -l) LIST=1; shift ;;
-        # Print the header block: line 2 through the first blank line. A fixed
-        # line range silently drifts out of date every time the header is edited.
-        -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help) shift ;;   # already handled above, before the .env check
         *) echo "error: unknown argument '$1' (expected -q, -i, -r, -E, -e, -d, -l, or stdin)" >&2; exit 1 ;;
     esac
 done
