@@ -1,6 +1,6 @@
 # local-cli/
 
-Local-workstation CLI wrappers for ad-hoc Fabric data exploration. Unlike the rest of this repo (which runs *inside* Fabric), these scripts run on a developer's machine and authenticate via the Azure CLI session — no SAS, no SP, no stored credentials.
+Local-workstation CLI wrappers for ad-hoc Fabric data exploration. Unlike the notebooks (which run *inside* Fabric), these scripts run on a developer's machine and authenticate via the Azure CLI session — no SAS, no SP, no stored credentials.
 
 These are templates. Copy them into a client repo at `scripts/data/` and use them there.
 
@@ -126,7 +126,7 @@ to (measured 2026-09-27).
 
 `-E`/`-e` pick which SQL endpoint the *registration* is read from, nothing more. There is typically one ION tenant behind every Fabric stage, so the rows come from the same ERP whichever environment is active — the flag changes where the request is looked up, never which system is asked.
 
-The control lookup shells out to `sql.sh` rather than reimplementing the `SQL_ENDPOINT_<NAME>` convention, so there is one reader of it. Copy both, or pass `-p` to skip the lookup entirely and probe an unregistered IDO.
+The control lookup shells out to `sql.sh` rather than reimplementing the `SQL_ENDPOINT_<NAME>` convention, so the bash scripts share one reader of it; the only other is git-sync's deploy report, in PowerShell ([parity table](../git-sync/warehouse-checks.md#one-env-convention-two-readers)). Copy both, or pass `-p` to skip the lookup entirely and probe an unregistered IDO.
 
 ### cosmos.sh — the live container, and the gateway rule
 

@@ -54,6 +54,13 @@
 # -e/-E/-d/-l are consumed here; every other flag passes straight to sqlcmd. -d
 # keeps sqlcmd's own meaning (database), so there is nothing new to remember.
 #
+# A SECOND READER of this .env convention: scripts/git-sync/
+# warehouse-deploy-report.ps1 carries a PowerShell copy of the endpoint lookup
+# below (env_value, cfg_value, list_endpoints and the resolution after the
+# argument loop), because a PowerShell script cannot call this one without Git
+# Bash. Change one, change both; the parity table in git-sync's
+# warehouse-checks.md maps each rule to its code in each.
+#
 # Deployment assumption: this script lives at <client-repo>/scripts/data/sql.sh
 # so SCRIPT_DIR/../.. resolves to the repo root containing .env.
 

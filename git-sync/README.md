@@ -10,6 +10,12 @@ them into a client repo at `scripts/git-sync/`, beside `scripts/data/`.
 | File | Purpose |
 | --- | --- |
 | [build_real_time_dashboard.py](build_real_time_dashboard.py) | Writes a Real-Time dashboard's `RealTimeDashboard.json` from a spec of pages and tiles in the same file, bound to one environment's KQL database through the workspace's Variable Library. `--check` compares the committed file with the build, as a CI drift guard; `--test` runs every tile's query through [kql.sh](../local-cli/kql.sh). Standard library only, Python 3.10 or later. |
+| [warehouse-build.ps1](warehouse-build.ps1) | Builds the warehouse's `.sqlproj` with `dotnet build`, the build Fabric runs on sync, and fails on any error. Finds the project itself, as the one `*.Warehouse/*.sqlproj` git tracks. `-Quiet` suits a pre-commit hook. Needs no tenant. |
+| [warehouse-deploy-report.ps1](warehouse-deploy-report.ps1) | Builds, asks `sqlpackage` for a DeployReport against the live warehouse, counts the rows of every table it flags, and says whether the sync will be refused for data loss, with the statements to run first when it will. Read-only. Reads the warehouse from `.env` as local-cli's `sql.sh` does, or from `-Server` and `-Database`. |
+
+The two warehouse scripts are copied together and documented on a page of
+their own, [warehouse-checks.md](warehouse-checks.md); the rest of this
+page is the dashboard generator's.
 
 ## Deployment into a client repo
 
