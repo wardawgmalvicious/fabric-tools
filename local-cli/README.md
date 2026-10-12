@@ -87,7 +87,7 @@ Two documented Microsoft routes into a semantic model were considered and reject
 
 Limits are the price ([API reference](https://learn.microsoft.com/rest/api/power-bi/datasets/execute-queries-in-group)): one query per call and one result table per query (`DEFINE MEASURE … EVALUATE …` is fine, two `EVALUATE`s aren't); 100,000 rows or 1,000,000 values, whichever comes first, and 15 MB; 120 requests/minute/user. Two service-side prerequisites, both one-time: the tenant setting **Dataset Execute Queries REST API** (Integration settings) and Build permission on the model. Models hosted in or live-connected to Azure Analysis Services aren't supported.
 
-Unlike `kql.sh`, a bad query is a real HTTP 400 — but a query that *ran* and then blew a service limit comes back **200 with the error in the body**, so the script checks both channels.
+As with `kql.sh`, a bad query is a real HTTP 400 — but a query that *ran* and then blew a service limit comes back **200 with the error in the body**, so the script checks both channels.
 
 `-s tables|columns|measures|relationships` runs a canned `INFO.VIEW.*` query projected down to the columns worth reading in a terminal — `-s columns` gives table/column/data type/summarize-by across the whole model, which is the fastest answer to "what exists and how is it typed". Note a doc-vs-reality gap here: the executeQueries reference lists INFO functions as unsupported on this endpoint, but that sentence is stale — `INFO.VIEW.*` queries are accepted and return normally (verified against a Direct Lake model on a Fabric capacity). The real constraint is permissions: INFO functions need semantic model admin rights, and `INFO.VIEW.*` blanks `[Expression]` for users without write permission — a measures listing with empty formulas means read-only access, not an empty model. If `-s` does fail, suspect permissions before support, and fall back to the Fabric `getDefinition` (TMDL) route.
 
@@ -137,7 +137,8 @@ Azure CLI token, no SDK. Three things differ from the other REST wrappers.
 The token goes in Cosmos's own `Authorization` form,
 `type=aad&ver=1.0&sig=<token>` URL-encoded, not as a bearer. Every request
 carries `x-ms-date` and `x-ms-version`. And errors are real HTTP statuses,
-unlike Kusto's 200 with an error body.
+where `kql.sh` must also read a 200's body for the warnings and partial
+failures Kusto reports there.
 
 **The endpoint is looked up by name on every run.** An entry holds the
 item's display name, which is also its database name, and the Fabric API

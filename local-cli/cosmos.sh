@@ -14,7 +14,8 @@
 #   - the token goes in Cosmos's own Authorization form, type=aad&ver=1.0&sig=<token>
 #     URL-encoded, not Bearer (Fabric's Cosmos DB has no keys, so aad is the only type);
 #   - every request carries x-ms-date and x-ms-version;
-#   - errors are real HTTP statuses, unlike Kusto's 200 with an error body.
+#   - errors are real HTTP statuses, where kql.sh must also read a 200's body for
+#     the warnings and partial failures Kusto reports there.
 #
 # THE GATEWAY RULE. The gateway will not run TOP, ORDER BY, OFFSET LIMIT, an aggregate,
 # DISTINCT or GROUP BY across partitions. It answers 400 "The provided cross partition

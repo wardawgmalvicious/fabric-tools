@@ -470,7 +470,7 @@ RESPONSE=$(printf 'header = "Authorization: Bearer %s"\n%s\n' "$TOKEN" "$BODY_LI
 HTTP="${RESPONSE##*$'\n'}"
 RESPONSE="${RESPONSE%$'\n'*}"
 
-# Two failure channels, unlike kql.sh's one. A malformed or rejected DAX query is
+# Two failure channels, as in kql.sh. A malformed or rejected DAX query is
 # a real HTTP 400; a query that ran but blew a service limit ("More than one
 # result table in a query", the 100k-row cap) comes back 200 with the error in
 # the body. Both are checked.
