@@ -402,7 +402,9 @@ TOKEN=$(az account get-access-token --resource "$CLUSTER" --query accessToken -o
 #
 # -b is for Windows, where native jq reads stdin in text mode: CRLF arrives as
 # LF, and a 0x1A byte ends the input with no error, so the query would be cut
-# short silently. -b (jq 1.7+) reads it byte for byte. Elsewhere there is no
+# short silently. -b (jq 1.7+) reads it byte for byte. It writes in text mode
+# too, ending every line CRLF (measured with jq 1.8.2, 2026-10-12), so each jq
+# below whose output is printed takes the flag as well. Elsewhere there is no
 # text mode to switch off, and jq 1.6 rejects the flag.
 JQ_BINARY_MODE=()
 case "$OSTYPE" in msys* | cygwin*) JQ_BINARY_MODE=(-b) ;; esac
@@ -424,7 +426,8 @@ RESPONSE="${RESPONSE%$'\n'*}"
 # is read first, whatever the status, because its message says what was wrong
 # and the status alone does not.
 if jq -e 'has("error")' >/dev/null 2>&1 <<<"$RESPONSE"; then
-    jq -r '.error | "kusto error: \(.["@message"] // .message // tostring)"' <<<"$RESPONSE" >&2
+    jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -r \
+        '.error | "kusto error: \(.["@message"] // .message // tostring)"' <<<"$RESPONSE" >&2
     exit 1
 fi
 
@@ -499,7 +502,7 @@ else
     # the header, .Rows[] the values. Later tables are QueryProperties, QueryStatus
     # and the table of contents. A row that is an object is a partial failure,
     # which goes to stderr with the other flags rather than into the table.
-    jq -r '
+    jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -r '
         .Tables[0] as $t
         | ([$t.Columns[].ColumnName] | @tsv),
           ([$t.Columns[].ColumnName] | map("-" * (length + 2)) | @tsv),
