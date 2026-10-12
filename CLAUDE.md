@@ -52,8 +52,8 @@ Review the unpushed commits first (`git log -p @{u}..`), and if they are clean, 
 
 Work that will outlive one session is written up as a brief,
 `docs/handoffs/execute/<subject>.md` — named for its subject, with no date
-or number, because the filename is the link target. None exists as of
-2026-09-30, and neither does the directory; the first brief creates it.
+or number, because the filename is the link target. The first one arrived
+on 2026-10-12 and created the directory.
 **Each brief holds its own state in frontmatter and no file lists the
 queue**, so starting or landing one edits nothing a parallel session is
 also editing:
@@ -90,8 +90,8 @@ uv run --no-project <agent-config>/scripts/handoff-status.py . --no-inbox
 **A brief is committed, so it is public** — unlike the note it is usually
 triaged from, since `~/handoff-inbox/fabric-tools/` is private and may be
 raw. Cite client material by kind, never by name; identity-guard reads only
-its list. The first brief also brings `docs/handoffs/execute/README.md`,
-which holds no queue: it declares direction (local, inbound or both), what
+its list. `docs/handoffs/execute/README.md`, which arrived with the first
+brief, holds no queue: it declares direction (local, inbound or both), what
 public means for scrubbing, and whether these briefs are the whole backlog.
 
 ## The notebook-metadata invariant (most important rule)
