@@ -42,6 +42,27 @@ These wrappers live in `fabric-tools` because Fabric is the primary use case, bu
 
 There is no `sqlcmd` equivalent for Kusto, so `kql.sh` posts to the cluster's REST endpoints directly with `curl` and formats the JSON response into a table with `jq`. Management commands (leading dot, e.g. `.show tables`) are routed to `/v1/rest/mgmt` automatically; everything else goes to `/v1/rest/query`. Kusto reports query errors in a 200 body rather than the HTTP status, so the script inspects the payload and surfaces the Kusto error message on stderr with a non-zero exit.
 
+A query can also come back with a result and still be wrong, and then the
+script exits **3**. Kusto flags such a result beside it rather than
+replacing it with an error: a QueryStatus row of Severity 3 (a warning)
+or less, or, after a
+[partial failure](https://learn.microsoft.com/kusto/concepts/partial-query-failures)
+such as a truncated result, an `{"Exceptions": [...]}` object where the
+next row belongs. The script still prints what arrived, as a table
+without the `Exceptions` object or raw with `-r`, and writes each flag to
+stderr as `kusto <severity>: <text>`. Warnings count too: the one that
+prompted the check, from a `range` whose `from` was past its `to`,
+returned no rows and read *Results may be incorrect or incomplete
+(E_INVALIDARG)* (measured against a Fabric Eventhouse, 2026-10-01).
+
+So 0 is a clean result, 3 a flagged one, and any other status means there
+is no result: 1 when Kusto refused the query or a login, `.env` entry or
+query is missing, otherwise the code of whichever step failed, such as
+curl's when the request never completed. The HTTP status itself is not
+checked, so an error answer whose body is empty or not JSON can still
+exit 0. Kusto promises a JSON body for every 4xx and 5xx except a 401
+([HTTP response](https://learn.microsoft.com/kusto/api/rest/response)).
+
 ### dax.sh — why executeQueries and not XMLA
 
 `dax.sh` reads the **model**, not the model's sources. The other three wrappers hit the warehouse, the lakehouse files, and the Eventhouse — everything upstream of the semantic layer. This one runs DAX against the published model, so what comes back has already been through the relationships, calculated columns, filter context, and measure logic. That's the number a report will actually show, which is what you want when writing a measure, sanity-checking a total, or deciding whether a column's scale and type suit a format string.

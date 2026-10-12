@@ -79,6 +79,14 @@
 #   # -r emits the raw Kusto JSON response instead of a table, for piping to jq:
 #   scripts/data/kql.sh -r -q "<Table> | take 1" | jq '.Tables[0].Rows'
 #
+# Exit status: 0 for a clean result, 3 when Kusto returned a result but flagged
+# it as incomplete or possibly wrong, and anything else when there is no result:
+# 1 for a refused query or a missing login, .env entry or query, otherwise the
+# code of the step that failed, such as curl's. A flagged result is still
+# printed, with each flag on stderr; the check after the request says why. The
+# HTTP status is not checked, so an error answer whose body is empty or not
+# JSON can still exit 0.
+#
 # Deployment assumption: this script lives at <client-repo>/scripts/data/kql.sh
 # so SCRIPT_DIR/../.. resolves to the repo root containing .env.
 
@@ -416,16 +424,65 @@ if jq -e 'has("error")' >/dev/null 2>&1 <<<"$RESPONSE"; then
     exit 1
 fi
 
+# A query can also come back with rows and still be wrong. Kusto says so beside
+# the result rather than in place of it, so the check above sees nothing, and it
+# has two ways of saying it (both measured against a Fabric Eventhouse,
+# 2026-10-01):
+#
+#   - A partial failure, such as a truncated result or a runaway query, ends a
+#     result table with an {"Exceptions": [...]} object where a row belongs, and
+#     the response stops there. Printed as one more row, it passed for data.
+#   - A query that completes reports how in its QueryStatus table, which the
+#     last table, the table of contents, points to. Kusto counts a Severity of 2
+#     or less as a failure. 3 is a warning, and it is flagged too: the one that
+#     prompted this check read "Results may be incorrect or incomplete
+#     (E_INVALIDARG)", from a range whose 'from' was past its 'to', and its
+#     result table had no row at all to show for it.
+#
+# Kusto's guidance is to ignore the whole result after a partial failure. What
+# arrived is still printed, so that it can be looked at, but each flag goes to
+# stderr and the exit status is 3, so no caller can take it for a clean result.
+# A management command returns one table and no table of contents, so only a
+# partial failure can flag one.
+FLAGS=$(jq ${JQ_BINARY_MODE+"${JQ_BINARY_MODE[@]}"} -r '
+    (.Tables // []) as $tables
+    | ($tables[-1].Columns // [] | map(.ColumnName)) as $toc
+    | ($toc | index("Kind")) as $kind
+    | ($toc | index("Ordinal")) as $ordinal
+    | ( $tables[].Rows[]? | objects
+        | (.Exceptions // [tostring])[] | tostring | split("\r\n")[0] | split("\n")[0]
+        | "kusto error: \(.)" ),
+      ( if $kind == null or $ordinal == null then empty
+        else $tables[-1].Rows[] | select(.[$kind] == "QueryStatus") | $tables[.[$ordinal]]
+            | (.Columns | map(.ColumnName)) as $columns
+            | ($columns | index("Severity")) as $severity
+            | ($columns | index("SeverityName")) as $name
+            | ($columns | index("StatusDescription")) as $description
+            # No Severity column would be a format change: flag every row rather
+            # than pass the result as clean.
+            | .Rows[] | select((if $severity == null then 0 else .[$severity] end) <= 3)
+            | (if $name == null then "status" else .[$name] | ascii_downcase end) as $level
+            | (if $description == null then tostring else .[$description] end) as $text
+            | "kusto \($level): \($text)"
+        end )
+' <<<"$RESPONSE" 2>/dev/null || true)
+
 if [[ "$RAW" -eq 1 ]]; then
     printf '%s\n' "$RESPONSE"
-    exit 0
+else
+    # v1 response shape: .Tables[0] carries the result set, .Columns[].ColumnName
+    # the header, .Rows[] the values. Later tables are QueryProperties, QueryStatus
+    # and the table of contents. A row that is an object is a partial failure,
+    # which goes to stderr with the other flags rather than into the table.
+    jq -r '
+        .Tables[0] as $t
+        | ([$t.Columns[].ColumnName] | @tsv),
+          ([$t.Columns[].ColumnName] | map("-" * (length + 2)) | @tsv),
+          ($t.Rows[] | arrays | map(if . == null then "" else tostring end) | @tsv)
+    ' <<<"$RESPONSE" | column -t -s $'\t'
 fi
 
-# v1 response shape: .Tables[0] carries the result set, .Columns[].ColumnName the
-# header, .Rows[] the values. Later tables are QueryStatus/QueryProperties.
-jq -r '
-    .Tables[0] as $t
-    | ([$t.Columns[].ColumnName] | @tsv),
-      ([$t.Columns[].ColumnName] | map("-" * (length + 2)) | @tsv),
-      ($t.Rows[] | map(if . == null then "" else tostring end) | @tsv)
-' <<<"$RESPONSE" | column -t -s $'\t'
+if [[ -n "$FLAGS" ]]; then
+    printf '%s\n' "$FLAGS" >&2
+    exit 3
+fi
