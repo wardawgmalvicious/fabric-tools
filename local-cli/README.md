@@ -40,7 +40,15 @@ These wrappers live in `fabric-tools` because Fabric is the primary use case, bu
 
 ### kql.sh — how it works
 
-There is no `sqlcmd` equivalent for Kusto, so `kql.sh` posts to the cluster's REST endpoints directly with `curl` and formats the JSON response into a table with `jq`. Management commands (leading dot, e.g. `.show tables`) are routed to `/v1/rest/mgmt` automatically; everything else goes to `/v1/rest/query`. Kusto reports query errors in a 200 body rather than the HTTP status, so the script inspects the payload and surfaces the Kusto error message on stderr with a non-zero exit.
+There is no `sqlcmd` equivalent for Kusto, so `kql.sh` posts to the
+cluster's REST endpoints directly with `curl` and formats the JSON response
+into a table with `jq`. Management commands (leading dot, e.g.
+`.show tables`) are routed to `/v1/rest/mgmt` automatically; everything
+else goes to `/v1/rest/query`. A refused query, such as a syntax error or a
+table that does not exist, answers HTTP 400 with an `error` object in the
+body
+([Kusto.Data exceptions](https://learn.microsoft.com/kusto/api/netfx/kusto-data-client-errors)),
+and the script prints Kusto's message from it on stderr and exits 1.
 
 A query can also come back with a result and still be wrong, and then the
 script exits **3**. Kusto flags such a result beside it rather than
@@ -56,12 +64,15 @@ returned no rows and read *Results may be incorrect or incomplete
 (E_INVALIDARG)* (measured against a Fabric Eventhouse, 2026-10-01).
 
 So 0 is a clean result, 3 a flagged one, and any other status means there
-is no result: 1 when Kusto refused the query or a login, `.env` entry or
-query is missing, otherwise the code of whichever step failed, such as
-curl's when the request never completed. The HTTP status itself is not
-checked, so an error answer whose body is empty or not JSON can still
-exit 0. Kusto promises a JSON body for every 4xx and 5xx except a 401
-([HTTP response](https://learn.microsoft.com/kusto/api/rest/response)).
+is no result: 1 when Kusto refused the query or answered without a result,
+or when a login, `.env` entry or query is missing; otherwise the code of
+whichever step failed, such as curl's when the request never completed.
+Without an `error` object, the answer must still carry a 2xx status and a
+`Tables` array. A 401 is why: it is the one error status Kusto does not
+promise a JSON body for
+([HTTP response](https://learn.microsoft.com/kusto/api/rest/response)),
+and with an empty body it would otherwise print nothing and exit 0, as
+though the query had matched no rows.
 
 ### dax.sh — why executeQueries and not XMLA
 

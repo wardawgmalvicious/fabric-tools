@@ -81,11 +81,10 @@
 #
 # Exit status: 0 for a clean result, 3 when Kusto returned a result but flagged
 # it as incomplete or possibly wrong, and anything else when there is no result:
-# 1 for a refused query or a missing login, .env entry or query, otherwise the
-# code of the step that failed, such as curl's. A flagged result is still
-# printed, with each flag on stderr; the check after the request says why. The
-# HTTP status is not checked, so an error answer whose body is empty or not
-# JSON can still exit 0.
+# 1 when Kusto refused the query or answered without a result, or a login, .env
+# entry or query is missing, otherwise the code of the step that failed, such
+# as curl's when the request never completed. A flagged result is still
+# printed, with each flag on stderr; the checks after the request say why.
 #
 # Deployment assumption: this script lives at <client-repo>/scripts/data/kql.sh
 # so SCRIPT_DIR/../.. resolves to the repo root containing .env.
@@ -412,20 +411,46 @@ BODY_LINE=$(printf '%s' "$QUERY" \
         '{db: $db, csl: .} | "data-binary = \(tojson | tojson)"')
 
 RESPONSE=$(printf 'header = "Authorization: Bearer %s"\n%s\n' "$TOKEN" "$BODY_LINE" \
-    | curl -sS -X POST "$ENDPOINT" \
+    | curl -sS -w '\n%{http_code}' -X POST "$ENDPOINT" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json" \
         --config -)
+HTTP="${RESPONSE##*$'\n'}"
+RESPONSE="${RESPONSE%$'\n'*}"
 
-# Kusto reports query errors in a 200 body, not the HTTP status, so check the
-# payload rather than curl's exit code.
+# A refused query, such as a syntax error or a table that does not exist,
+# answers HTTP 400 (Kusto.Data's exception reference gives the status of each),
+# and every 4xx and 5xx but a 401 carries an error object in its body. The body
+# is read first, whatever the status, because its message says what was wrong
+# and the status alone does not.
 if jq -e 'has("error")' >/dev/null 2>&1 <<<"$RESPONSE"; then
     jq -r '.error | "kusto error: \(.["@message"] // .message // tostring)"' <<<"$RESPONSE" >&2
     exit 1
 fi
 
+# Without an error object the answer must still be a result: a 2xx status, and
+# the Tables array Kusto's response reference promises with one. Neither is a
+# given. curl without --fail exits 0 on any status, and a 401's body need not be
+# JSON, so without this check a 401 with an empty body would print nothing and
+# exit 0, as though the query had matched no rows.
+NO_RESULT=""
+if [[ "$HTTP" != 2* ]]; then
+    NO_RESULT="Kusto answered HTTP $HTTP"
+elif ! jq -e '.Tables | type == "array"' >/dev/null 2>&1 <<<"$RESPONSE"; then
+    NO_RESULT="Kusto answered HTTP $HTTP without a result"
+fi
+if [[ -n "$NO_RESULT" ]]; then
+    echo "error: $NO_RESULT" >&2
+    if [[ -n "$RESPONSE" ]]; then printf '%s\n' "${RESPONSE:0:400}" >&2; fi
+    if [[ "$HTTP" == 401 ]]; then
+        echo "hint: the token was refused; an account that is a guest in several tenants" >&2
+        echo "      needs AZURE_TENANT_ID, so az mints in the tenant that owns the cluster" >&2
+    fi
+    exit 1
+fi
+
 # A query can also come back with rows and still be wrong. Kusto says so beside
-# the result rather than in place of it, so the check above sees nothing, and it
+# the result rather than in place of it, so the checks above see nothing, and it
 # has two ways of saying it (both measured against a Fabric Eventhouse,
 # 2026-10-01):
 #
