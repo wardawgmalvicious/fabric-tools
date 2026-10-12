@@ -26,9 +26,10 @@ still has to settle, as [git-sync/README.md](../../../git-sync/README.md)
 
 1. **A portal round trip, and the bytes for a character beyond ASCII.**
    `problems()` refuses any such character, because no portal commit seen
-   so far has held one. `json.dumps` writes `é`; were the portal to
-   write the letter itself, `--check` would fail the first round trip as
-   drift.
+   so far has held one. `json.dumps` escapes `é` as `\u00e9`, in
+   lower-case hex. Were the portal to write the letter itself, or to
+   escape it in upper-case hex as .NET's `System.Text.Json` does,
+   `--check` would fail the first round trip as drift.
 2. **Whether the logicalId alone binds.** The data source names its
    database by item id, `databaseArtifactId`, and by logicalId,
    `database`, and the first load showed the two bind together. If the
@@ -56,6 +57,14 @@ connection, `GET /v1/workspaces/{workspaceId}/git/connection`, before
 assuming what it holds. The user drives the portal. A session can only
 watch a load, through `.show queries` and the `Kusto.Web.RTA` application
 name the folder README gives.
+
+The non-ASCII half of probe 1, and probe 2, already have a home. A
+client estate's own brief (2026-10-01) runs the same round trip against
+that estate's generator, with a workspace and branch set aside for it, and
+lists the logicalId question as an extra the same setup could settle. Take
+its result rather than repeating either probe here; that brief already
+says to tell the user once its answer is in. The template's own round
+trip with no diff, `--test` and `--publish` stay here.
 
 1. **Round trip.** Build for the workspace's environment, commit, and
    update the workspace from Git. Open the page and see the four tiles
@@ -88,11 +97,14 @@ name the folder README gives.
   *Limits*, with the date. A diff means the portal's shape moved, and
   `build()`, `SCHEMA_VERSION` and the README's table follow what it
   wrote.
-- **The portal writes `\u` escapes**: `serialize()` already matches, so
-  lift the ASCII check from `problems()` and say so in `serialize()`'s
-  docstring. **It writes the characters themselves**: serialize with
-  `ensure_ascii=False`, and lift the check the same way. Either way,
-  record the measured form and its date where the check stood.
+- **The portal writes `\u00e9`, lower-case**: `serialize()` already
+  matches, so lift the ASCII check from `problems()` and say so in
+  `serialize()`'s docstring. **It writes `\u00E9`, upper-case**:
+  `json.dumps` cannot emit that, so `serialize()` upper-cases its escapes
+  after dumping, and the check lifts the same way. **It writes the
+  characters themselves**: serialize with `ensure_ascii=False`, and lift
+  the check. **Anything else**: record it, and keep the check. In every
+  case, record the measured form and its date where the check stood.
 - **The logicalId alone binds**: say so in the folder README's binding
   section, with the date, and put to the user whether the build should
   still carry an item id, since a deployment pipeline does not sync from
@@ -126,12 +138,17 @@ Everything above. The offline checks of 2026-10-12 ran from a scratch
 harness that was not committed: 69 checks on Python 3.11 to 3.13, and the
 byte comparison against the client estate's committed file.
 
+One character settles the portal's rule only inside the Basic
+Multilingual Plane. A character outside it, such as an emoji, escapes as
+a surrogate pair, and no probe here covers one.
+
 ## Scrubbing
 
 The inbox note was raw. It named the client estate's items, Variable
 Library, value sets, functions, columns, commits, pull requests and a
 branch, and none of that is here. The figures that stay are counts, sizes
-and dates.
+and dates. The estate's round-trip brief is cited by kind and date alone,
+and only the general fact about hex case came from it.
 
 ## Re-measure before acting
 
