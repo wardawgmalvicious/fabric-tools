@@ -1,6 +1,6 @@
 # fabric-tools
 
-A collection of Microsoft Fabric notebooks, local CLI wrappers, and configuration guides for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
+A collection of Microsoft Fabric notebooks, local CLI wrappers, item-definition generators, and configuration guides for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
 
 Most community Fabric content assumes interactive user authentication and manual portal clicks. This toolkit takes the opposite approach: everything runs via service principal, everything is parameterized, and everything is designed to slot into automated pipelines.
 
@@ -44,6 +44,9 @@ fabric-tools/
 │   ├── report-png.sh
 │   ├── sql.sh
 │   └── README.md
+├── git-sync/           # Item definitions written from code for a Git-synced workspace - a Real-Time dashboard bound per environment
+│   ├── build_real_time_dashboard.py
+│   └── README.md
 ├── docs/               # Repo-level documentation and generated assets
 │   └── social/         # GitHub social preview card - HTML source plus the rendered PNG
 ├── .githooks/          # Opt-in git hooks - strip Fabric metadata from notebooks, gate what reaches a public remote
@@ -57,6 +60,7 @@ fabric-tools/
 - Service principal with appropriate Fabric API permissions
 - Fabric notebooks runtime (PySpark; a few notebooks are pure Python)
 - For `local-cli/` only: Azure CLI (`az login`) on the workstation, plus `sqlcmd`, `duckdb`, `curl`, and `jq`. These wrappers authenticate as the signed-in user, not a service principal.
+- For `git-sync/` only: Python 3.10 or later, standard library only. Building and checking a definition reads only the repo; `--test` queries through `local-cli/kql.sh`, as the signed-in user.
 
 ## Design Principles
 
@@ -71,6 +75,7 @@ fabric-tools/
 2. Configure `nb_sp_common` with your Key Vault name and secret names.
 3. Start with `admin/nb_sp_create_item.ipynb` to provision workspace items, or `maintenance/nb_lh_optimize.ipynb` to run table maintenance.
 4. For querying Fabric from your own machine, copy `local-cli/` into a client repo at `scripts/data/` and its `.env.sample` to that repo's root as `.env`.
+5. To own a Real-Time dashboard's definition in code, copy `git-sync/build_real_time_dashboard.py` into the client repo at `scripts/git-sync/`, beside `scripts/data/`.
 
 See each folder's README for detailed usage.
 
