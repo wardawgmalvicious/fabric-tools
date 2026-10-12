@@ -1,6 +1,6 @@
 # fabric-tools
 
-A collection of Microsoft Fabric notebooks, local CLI wrappers, item-definition generators, and configuration guides for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
+A collection of Microsoft Fabric notebooks, local CLI wrappers, item-definition generators, Git-sync checks, and configuration guides for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
 
 Most community Fabric content assumes interactive user authentication and manual portal clicks. This toolkit takes the opposite approach: everything runs via service principal, everything is parameterized, and everything is designed to slot into automated pipelines.
 
@@ -44,8 +44,11 @@ fabric-tools/
 │   ├── report-png.sh
 │   ├── sql.sh
 │   └── README.md
-├── git-sync/           # Item definitions written from code for a Git-synced workspace - a Real-Time dashboard bound per environment
+├── git-sync/           # For a Git-synced workspace - a Real-Time dashboard's definition written from code and bound per environment, and Warehouse checks before the sync
 │   ├── build_real_time_dashboard.py
+│   ├── warehouse-build.ps1
+│   ├── warehouse-checks.md
+│   ├── warehouse-deploy-report.ps1
 │   └── README.md
 ├── docs/               # Repo-level documentation and generated assets
 │   └── social/         # GitHub social preview card - HTML source plus the rendered PNG
@@ -60,7 +63,7 @@ fabric-tools/
 - Service principal with appropriate Fabric API permissions
 - Fabric notebooks runtime (PySpark; a few notebooks are pure Python)
 - For `local-cli/` only: Azure CLI (`az login`) on the workstation, plus `sqlcmd`, `duckdb`, `curl`, and `jq`. These wrappers authenticate as the signed-in user, not a service principal.
-- For `git-sync/` only: Python 3.10 or later, standard library only. Building and checking a definition reads only the repo; `--test` queries through `local-cli/kql.sh`, as the signed-in user.
+- For `git-sync/` only: Python 3.10 or later for the dashboard generator, standard library only. Building and checking a definition reads only the repo; `--test` queries through `local-cli/kql.sh`, as the signed-in user. The warehouse checks need PowerShell 7 and the .NET SDK; the deploy report adds `sqlpackage`, the Azure CLI and `sqlcmd`, and signs in as the user the same way.
 
 ## Design Principles
 
@@ -76,6 +79,7 @@ fabric-tools/
 3. Start with `admin/nb_sp_create_item.ipynb` to provision workspace items, or `maintenance/nb_lh_optimize.ipynb` to run table maintenance.
 4. For querying Fabric from your own machine, copy `local-cli/` into a client repo at `scripts/data/` and its `.env.sample` to that repo's root as `.env`.
 5. To own a Real-Time dashboard's definition in code, copy `git-sync/build_real_time_dashboard.py` into the client repo at `scripts/git-sync/`, beside `scripts/data/`.
+6. For a Fabric Warehouse kept in Git, copy `git-sync/warehouse-build.ps1` and `git-sync/warehouse-deploy-report.ps1` into the client repo at `scripts/git-sync/`, to catch a change the sync would reject before you commit or push it.
 
 See each folder's README for detailed usage.
 
