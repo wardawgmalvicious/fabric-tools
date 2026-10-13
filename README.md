@@ -44,8 +44,10 @@ fabric-tools/
 │   ├── report-png.sh
 │   ├── sql.sh
 │   └── README.md
-├── git-sync/           # For a Git-synced workspace - a Real-Time dashboard's definition written from code and bound per environment, and Warehouse checks before the sync
+├── git-sync/           # For a Git-synced workspace - a Real-Time dashboard's definition written from code and bound per environment, Warehouse checks before the sync, and the sync itself run from a shell
 │   ├── build_real_time_dashboard.py
+│   ├── update-from-git.md
+│   ├── update_from_git.py
 │   ├── warehouse-build.ps1
 │   ├── warehouse-checks.md
 │   ├── warehouse-deploy-report.ps1
@@ -63,7 +65,7 @@ fabric-tools/
 - Service principal with appropriate Fabric API permissions
 - Fabric notebooks runtime (PySpark; a few notebooks are pure Python)
 - For `local-cli/` only: Azure CLI (`az login`) on the workstation, plus `sqlcmd`, `duckdb`, `curl`, and `jq`. These wrappers authenticate as the signed-in user, not a service principal.
-- For `git-sync/` only: Python 3.10 or later for the dashboard generator, standard library only. Building and checking a definition reads only the repo; `--test` queries through `local-cli/kql.sh`, as the signed-in user. The warehouse checks need PowerShell 7 and the .NET SDK; the deploy report adds `sqlpackage`, the Azure CLI and `sqlcmd`, and signs in as the user the same way.
+- For `git-sync/` only: Python 3.10 or later for the dashboard generator, standard library only. Building and checking a definition reads only the repo; `--test` queries through `local-cli/kql.sh`, as the signed-in user. The warehouse checks need PowerShell 7 and the .NET SDK; the deploy report adds `sqlpackage`, the Azure CLI and `sqlcmd`, and signs in as the user the same way. The update script needs the same Python and the Azure CLI, and runs as whoever `az` is signed in as.
 
 ## Design Principles
 
@@ -80,6 +82,7 @@ fabric-tools/
 4. For querying Fabric from your own machine, copy `local-cli/` into a client repo at `scripts/data/` and its `.env.sample` to that repo's root as `.env`.
 5. To own a Real-Time dashboard's definition in code, copy `git-sync/build_real_time_dashboard.py` into the client repo at `scripts/git-sync/`, beside `scripts/data/`.
 6. For a Fabric Warehouse kept in Git, copy `git-sync/warehouse-build.ps1` and `git-sync/warehouse-deploy-report.ps1` into the client repo at `scripts/git-sync/`, to catch a change the sync would reject before you commit or push it.
+7. To let an agent update a development workspace from Git after it pushes, and read the result back, copy `git-sync/update_from_git.py` into the client repo at `scripts/git-sync/`, and give the repo's agent instructions the scope rule in `git-sync/update-from-git.md`.
 
 See each folder's README for detailed usage.
 
