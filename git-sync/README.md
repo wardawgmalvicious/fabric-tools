@@ -1,9 +1,10 @@
 # git-sync/
 
 Scripts that write or check the item definitions a Fabric workspace syncs
-to Git. Like [local-cli/](../local-cli/), they run on a developer's
-machine or in CI rather than inside Fabric, and they are templates: copy
-them into a client repo at `scripts/git-sync/`, beside `scripts/data/`.
+to Git, and one that runs the sync. Like [local-cli/](../local-cli/),
+they run on a developer's machine or in CI rather than inside Fabric, and
+they are templates: copy them into a client repo at `scripts/git-sync/`,
+beside `scripts/data/`.
 
 ## Contents
 
@@ -12,10 +13,13 @@ them into a client repo at `scripts/git-sync/`, beside `scripts/data/`.
 | [build_real_time_dashboard.py](build_real_time_dashboard.py) | Writes a Real-Time dashboard's `RealTimeDashboard.json` from a spec of pages and tiles in the same file, bound to one environment's KQL database through the workspace's Variable Library. `--check` compares the committed file with the build, as a CI drift guard; `--test` runs every tile's query through [kql.sh](../local-cli/kql.sh). Standard library only, Python 3.10 or later. |
 | [warehouse-build.ps1](warehouse-build.ps1) | Builds the warehouse's `.sqlproj` with `dotnet build`, the build Fabric runs on sync, and fails on any error. Finds the project itself, as the one `*.Warehouse/*.sqlproj` git tracks. `-Quiet` suits a pre-commit hook. Needs no tenant. |
 | [warehouse-deploy-report.ps1](warehouse-deploy-report.ps1) | Builds, asks `sqlpackage` for a DeployReport against the live warehouse, counts the rows of every table it flags, and says whether the sync will be refused for data loss, with the statements to run first when it will. Read-only. Reads the warehouse from `.env` as local-cli's `sql.sh` does, or from `-Server` and `-Database`. |
+| [update_from_git.py](update_from_git.py) | Updates a Git-connected workspace to its branch's head through the REST API, as the Source control pane's **Update all** does, and reads its Git status before and after, so an agent that has pushed can sync the workspace and check the result itself. Stops before any change when an item is in conflict, and refuses any environment its settings don't list. Standard library only, Python 3.10 or later. |
 
 The two warehouse scripts are copied together and documented on a page of
-their own, [warehouse-checks.md](warehouse-checks.md); the rest of this
-page is the dashboard generator's.
+their own, [warehouse-checks.md](warehouse-checks.md), and the update
+script, with the agent workflow it carries, on
+[update-from-git.md](update-from-git.md). The rest of this page is the
+dashboard generator's.
 
 ## Deployment into a client repo
 
@@ -118,6 +122,10 @@ the dashboard at a database other than the one `--env` names:
 - a reference with no `itemId` GUID;
 - two environments on one database, which is how a value set that lost its
   override of the reference looks: it inherits the default's.
+
+[update_from_git.py](update_from_git.py) reads the library by these same
+rules, for an ItemReference's `workspaceId` where this script reads its
+`itemId`, so a change to them is a change to both.
 
 A repo with no Variable Library binds with `--database-id <GUID>`, the KQL
 database's item id. `--env` then only names the build, and picks

@@ -365,7 +365,9 @@ def load_bindings() -> dict[str, Binding]:
     resolves them. Each value set is an environment, named by ENVIRONMENT_VARIABLE lower-cased.
     The default value set is one too, unless its name is empty or a value set names the same
     environment with the same database, so a library whose Dev runs on the defaults and one
-    that gives Dev a value set of its own both read as they mean.
+    that gives Dev a value set of its own both read as they mean. update_from_git.py reads the
+    library by the same rules, for the reference's workspaceId, so a change to one is a change
+    to both.
 
     Returns:
         The --env name -> its binding.
