@@ -1,6 +1,6 @@
 # fabric-tools
 
-A collection of Microsoft Fabric notebooks, local CLI wrappers, item-definition generators, Git-sync checks, and configuration guides for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
+A collection of Microsoft Fabric notebooks, local CLI wrappers, item-definition generators, and Git-sync checks for platform engineering - SP-first, Variable Library-driven, and CI/CD-ready.
 
 Most community Fabric content assumes interactive user authentication and manual portal clicks. This toolkit takes the opposite approach: everything runs via service principal, everything is parameterized, and everything is designed to slot into automated pipelines.
 
@@ -29,10 +29,6 @@ fabric-tools/
 │   ├── nb_deployment_pipeline_audit.ipynb
 │   ├── nb_extract_guids.ipynb
 │   ├── nb_migrate_items.ipynb
-│   └── README.md
-├── guides/             # Reusable configuration guides for Fabric Copilot surfaces
-│   ├── configure-ai-semantic-model.md
-│   ├── configure-data-agent.md
 │   └── README.md
 ├── local-cli/          # Local-workstation CLI wrappers (sqlcmd, DuckDB, curl + jq over REST) for ad-hoc Fabric data exploration
 │   ├── .env.sample
